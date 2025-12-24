@@ -12,7 +12,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
-#define PORT "9034"   // port we're listening on
+#define PORT "9038"   // port we're listening on
 
 /*
  * Convert socket to IP address string.
@@ -120,7 +120,7 @@ void handle_new_connection(int listener, fd_set *master, int *fdmax)
 			*fdmax = newfd;
 		}
 		printf("selectserver: new connection from %s on "
-			"socket %d\n",
+			"socket %d\n", // C compilers automatically concatenate adjacent string literals
 			inet_ntop2(&remoteaddr, remoteIP, sizeof remoteIP),
 			newfd);
 	}
@@ -136,7 +136,7 @@ void broadcast(char *buf, int nbytes, int listener, int s,
 		// send to everyone!
 		if (FD_ISSET(j, master)) {
 			// except the listener and ourselves
-			if (j != listener && j != s) {
+			if (j != listener && j != s) { 		// s --> sender's socket_fd
 				if (send(j, buf, nbytes, 0) == -1) {
 					perror("send");
 				}

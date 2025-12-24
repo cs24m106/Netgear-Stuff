@@ -21,7 +21,9 @@ int main(void)
 	FD_SET(STDIN, &readfds);
 
 	// don't care about writefds and exceptfds:
-	select(STDIN+1, &readfds, NULL, NULL, &tv);
+	printf("STDIN value: %d\n", STDIN);
+	select(STDIN+1, &readfds, NULL, NULL, &tv); //numfds = 0+1 ?? -> stdin tat already exists in readfs
+	// means: “Please examine file descriptors from 0 up to 1 (not inclusive upperlimit)”
 
 	if (FD_ISSET(STDIN, &readfds))
 		printf("A key was pressed!\n");

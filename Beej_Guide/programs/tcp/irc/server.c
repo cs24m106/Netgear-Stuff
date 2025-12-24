@@ -24,7 +24,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define PORT "3490"
+#define PORT "9034"
 #define MAXDATASIZE 512
 
 /* send_all: ensure whole buffer sent */

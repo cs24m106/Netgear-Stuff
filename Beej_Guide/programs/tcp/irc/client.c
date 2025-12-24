@@ -23,7 +23,6 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-#define PORT "3490"
 #define MAXDATASIZE 512
 
 ssize_t send_all(int sockfd, const char *buf, size_t len) {
@@ -47,8 +46,8 @@ void *get_in_addr(struct sockaddr *sa) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s hostname\n", argv[0]);
+    if (argc != 3) {
+        fprintf(stderr, "usage: %s hostname portno\n", argv[0]);
         exit(1);
     }
 
@@ -60,7 +59,7 @@ int main(int argc, char *argv[]) {
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    if ((rv = getaddrinfo(argv[1], PORT, &hints, &servinfo)) != 0) {
+    if ((rv = getaddrinfo(argv[1], argv[2], &hints, &servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }

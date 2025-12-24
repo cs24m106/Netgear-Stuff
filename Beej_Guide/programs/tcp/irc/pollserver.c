@@ -13,7 +13,7 @@
 #include <netdb.h>
 #include <poll.h>
 
-#define PORT "3490"   // Port we're listening on
+#define PORT "9036"   // Port we're listening on
 #define MAXDATASIZE 512
 
 /*
@@ -253,7 +253,7 @@ int main(void)
 
 	fd_count = 1; // For the listener
 	
-	printf("pollserver: waiting for connections @[%d]...", PORT);
+	printf("pollserver: waiting for connections @[%s]...\n", PORT);
 
 	// Main loop
 	for(;;) {

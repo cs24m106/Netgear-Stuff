@@ -42,3 +42,22 @@ That’s how you know the client has closed the connection."*
 - for both new client conn --> read from listener socker, i.e. add to readfds
 - and for old client disconn, --> read from resp client gives nbytes=0 on recv, implies client disconnected
 - conclusion in common, having to add both situation type socket_fds into readfds fd_set
+
+**how to handle new fd_max when client disconnects? not necessarily needed but if i were to implement it for efficient for-loop search**<br>
+It matters when:
+- You have many short-lived connections
+-File descriptor numbers grow large
+- You care about reducing O(fdmax) scanning cost
+This is exactly one of the historical reasons select() does not scale well.
+```c
+/*  Refer the question comment in selectserver.c
+    Recompute fdmax ONLY if needed */
+        if (s == *fdmax) {
+            for (int i = *fdmax - 1; i >= 0; i--) {
+                if (FD_ISSET(i, master)) {
+                    *fdmax = i;
+                    break;
+                }
+            }
+        }
+```

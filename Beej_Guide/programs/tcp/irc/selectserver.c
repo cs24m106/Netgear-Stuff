@@ -108,9 +108,7 @@ void handle_new_connection(int listener, fd_set *master, int *fdmax)
 	char remoteIP[INET6_ADDRSTRLEN];
 
 	addrlen = sizeof remoteaddr;
-	newfd = accept(listener,
-		(struct sockaddr *)&remoteaddr,
-		&addrlen);
+	newfd = accept(listener, (struct sockaddr *)&remoteaddr, &addrlen);
 
 	if (newfd == -1) {
 		perror("accept");
@@ -165,6 +163,7 @@ void handle_client_data(int s, int listener, fd_set *master,
 		}
 		close(s); // bye!
 		FD_CLR(s, master); // remove from master set
+		// how to handle new fd_max? not necessarily need but if i were to implement it for efficient for-loop search
 	} else {
 		// we got some data from a client
 		broadcast(buf, nbytes, listener, s, master, fdmax);
@@ -195,14 +194,13 @@ int main(void)
 
 	// main loop
 	for(;;) {
-		read_fds = master; // copy it
+		read_fds = master; // copy it, why? as select overwrites it with socket_fds that are "ready to read"
 		if (select(fdmax+1, &read_fds, NULL, NULL, NULL) == -1) {
 			perror("select");
 			exit(4);
 		}
 
-		// run through the existing connections looking for data
-		// to read
+		// run through the existing connections looking for data to read
 		for(int i = 0; i <= fdmax; i++) {
 			if (FD_ISSET(i, &read_fds)) { // we got one!!
 				if (i == listener)

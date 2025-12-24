@@ -105,7 +105,7 @@ int main(int argc, char *argv[])
 	// Poll stdin and sockfd for incoming data (ready-to-read)
 	struct pollfd fds[2];
 
-	fds[0].fd = 0;
+	fds[0].fd = 0; // STDIN's file discriptor = 0
 	fds[0].events = POLLIN;
 
 	fds[1].fd = sockfd;
@@ -113,7 +113,7 @@ int main(int argc, char *argv[])
 
 	// Main loop
 	for(;;) {
-		if (poll(fds, 2, -1) == -1) {
+		if (poll(fds, 2, -1) == -1) { // timeout=-1 --> wait indefinitly
 			perror("poll");
 			exit(1);
 		}
@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
 				char *p = buf;
 				int remainingbytes = readbytes;
 
-				// Write all data out
+				// Write all data out --> similar to sendall() implementation in section 7.3
 				while (remainingbytes > 0) {
 					if ((writebytes = write(outfd, p, remainingbytes)) == -1) {
 						perror("write");

@@ -1,0 +1,1 @@
+[Socket Server Achitechtures](https://stackoverflow.com/questions/11950787/c-socket-server-architecture)

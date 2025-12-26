@@ -78,6 +78,7 @@ long double unpack754(unsigned long long int i, unsigned bits, unsigned expbits)
 void packi16(unsigned char *buf, unsigned int i)
 {
 	*buf++ = i>>8; *buf++ = i;
+	// *buf++ op prec ==> *(buf++) ==> apply *buf and incr ++buf later (as its post-incr)
 }
 
 /*
@@ -91,29 +92,18 @@ void packi32(unsigned char *buf, unsigned long int i)
 
 /*
 ** packi64() -- store a 64-bit int into a char buffer (like htonl())
+notice the shift values are reverse multiples of 8 (as 1Byte = 8bits)
 */ 
 void packi64(unsigned char *buf, unsigned long long int i)
 {
-	*buf++ = i>>56; *buf++ = i>>48;
-	*buf++ = i>>40; *buf++ = i>>32;
-	*buf++ = i>>24; *buf++ = i>>16;
-	*buf++ = i>>8;  *buf++ = i;
-}
-
-/*
-** unpacki16() -- unpack a 16-bit int from a char buffer (like
-**                ntohs())
-*/ 
-int unpacki16(unsigned char *buf)
-{
-	unsigned int i2 = ((unsigned int)buf[0]<<8) | buf[1];
-	int i;
-
-	// change unsigned numbers to signed
-	if (i2 <= 0x7fffu) { i = i2; }
-	else { i = -1 - (unsigned int)(0xffffu - i2); }
-
-	return i;
+	*buf++ = i>>56; // 1st Byte from bit pos[64:56]
+	*buf++ = i>>48; // 2nd Byte from bit pos[56:48]
+	*buf++ = i>>40; // 3rd Byte from bit pos[48:40]
+	*buf++ = i>>32; // 4th Byte from bit pos[40:32]
+	*buf++ = i>>24; // 5th Byte from bit pos[32:24]
+	*buf++ = i>>16; // 6th Byte from bit pos[24:16]
+	*buf++ = i>>8;  // 7th Byte from bit pos[16:08]
+	*buf++ = i;		// 8th Byte from bit pos[08:00]
 }
 
 /*
@@ -126,20 +116,17 @@ unsigned int unpacku16(unsigned char *buf)
 }
 
 /*
-** unpacki32() -- unpack a 32-bit int from a char buffer (like
-**                ntohl())
+** unpacki16() -- unpack a 16-bit int from a char buffer (like
+**                ntohs())
 */ 
-long int unpacki32(unsigned char *buf)
+int unpacki16(unsigned char *buf)
 {
-	unsigned long int i2 = ((unsigned long int)buf[0]<<24) |
-	                       ((unsigned long int)buf[1]<<16) |
-	                       ((unsigned long int)buf[2]<<8)  |
-	                       buf[3];
-	long int i;
+	unsigned int i2 = unpacku16(buf);
+	int i;
 
 	// change unsigned numbers to signed
-	if (i2 <= 0x7fffffffu) { i = i2; }
-	else { i = -1 - (long int)(0xffffffffu - i2); }
+	if (i2 <= 0x7fffu) { i = i2; } // if MSB == 0, no need to change i.e if val < (2^(n-1))-1, where n=16 here
+	else { i = -1 - (unsigned int)(0xffffu - i2); } // two’s complement decoding? sign bit extention sizeof(int)=4B=32bits>16bits
 
 	return i;
 }
@@ -151,31 +138,23 @@ long int unpacki32(unsigned char *buf)
 unsigned long int unpacku32(unsigned char *buf)
 {
 	return ((unsigned long int)buf[0]<<24) |
-	       ((unsigned long int)buf[1]<<16) |
-	       ((unsigned long int)buf[2]<<8)  |
-	       buf[3];
+		   ((unsigned long int)buf[1]<<16) |
+		   ((unsigned long int)buf[2]<<8)  |
+		   buf[3];
 }
 
 /*
-** unpacki64() -- unpack a 64-bit int from a char buffer (like
+** unpacki32() -- unpack a 32-bit int from a char buffer (like
 **                ntohl())
 */ 
-long long int unpacki64(unsigned char *buf)
+long int unpacki32(unsigned char *buf)
 {
-	unsigned long long int i2 =
-        ((unsigned long long int)buf[0]<<56) |
-        ((unsigned long long int)buf[1]<<48) |
-        ((unsigned long long int)buf[2]<<40) |
-        ((unsigned long long int)buf[3]<<32) |
-        ((unsigned long long int)buf[4]<<24) |
-        ((unsigned long long int)buf[5]<<16) |
-        ((unsigned long long int)buf[6]<<8)  |
-        buf[7];
-	long long int i;
+	unsigned long int i2 = unpacku32(buf);
+	long int i;
 
 	// change unsigned numbers to signed
-	if (i2 <= 0x7fffffffffffffffu) { i = i2; }
-	else { i = -1 -(long long int)(0xffffffffffffffffu - i2); }
+	if (i2 <= 0x7fffffffu) { i = i2; }
+	else { i = -1 - (long int)(0xffffffffu - i2); }
 
 	return i;
 }
@@ -194,6 +173,22 @@ unsigned long long int unpacku64(unsigned char *buf)
 	       ((unsigned long long int)buf[5]<<16) |
 	       ((unsigned long long int)buf[6]<<8)  |
 	       buf[7];
+}
+
+/*
+** unpacki64() -- unpack a 64-bit int from a char buffer (like
+**                ntohl())
+*/ 
+long long int unpacki64(unsigned char *buf)
+{
+	unsigned long long int i2 = unpacku64(buf);
+	long long int i;
+
+	// change unsigned numbers to signed
+	if (i2 <= 0x7fffffffffffffffu) { i = i2; }
+	else { i = -1 -(long long int)(0xffffffffffffffffu - i2); }
+
+	return i;
 }
 
 /*
@@ -322,9 +317,9 @@ unsigned int pack(unsigned char *buf, char *format, ...)
 			s = va_arg(ap, char*);
 			len = strlen(s);
 			size += len + 2;
-			packi16(buf, len);
+			packi16(buf, len); // copy len (here 16bits) of the string as first part of buffer data
 			buf += 2;
-			memcpy(buf, s, len);
+			memcpy(buf, s, len); // copy the actual string after placing length into buffer
 			buf += len;
 			break;
 		}
@@ -426,7 +421,7 @@ void unpack(unsigned char *buf, char *format, ...)
 			buf += 8;
 			break;
 
-		case 'f': // float
+		case 'f': // float-16
 			f = va_arg(ap, float*);
 			fhold = unpacku16(buf);
 			*f = unpack754_16(fhold);
@@ -449,14 +444,15 @@ void unpack(unsigned char *buf, char *format, ...)
 
 		case 's': // string
 			s = va_arg(ap, char*);
-			len = unpacku16(buf);
+			len = unpacku16(buf); // read the length of string from buffer first
 			buf += 2;
-			if (maxstrlen > 0 && len > maxstrlen)
+			if (maxstrlen > 0 && len > maxstrlen) // optional read feature 
+			// like 10s --> read only first 10 chars of string including the terminating char '\0' 
                 count = maxstrlen - 1;
 			else
                 count = len;
 			memcpy(s, buf, count);
-			s[count] = '\0';
+			s[count] = '\0'; // TO DO: handle segmentation fault when size(s) < buffer string 
 			buf += len;
 			break;
 
@@ -466,7 +462,7 @@ void unpack(unsigned char *buf, char *format, ...)
 			}
 		}
 
-		if (!isdigit(*format)) maxstrlen = 0;
+		if (!isdigit(*format)) maxstrlen = 0; // reset max str len when format literal char is non digit
 	}
 
 	va_end(ap);

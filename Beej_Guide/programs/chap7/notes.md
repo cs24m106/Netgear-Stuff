@@ -140,3 +140,36 @@ What goes wrong?
 - The next argument is now read from the wrong address
 
 *Thus its `vg_arg` call is supposed to be made w.r.t. crt promoted types and explicitly casted back to the required type for certain cases as mentioned above.*
+
+## 7.7 Broadcast Packets
+- broadcasting supported for ipv4, only for udp, not for tcp.
+- for ipv6, have to resort to superior technique "multicasting"
+
+old school methods (supported for ippv4 only mostly)
+- `bzero/bcopy` are BSD legacy functions (now deprecated on many platforms). They behave like `memset/memcpy`.
+- `socket_in.sin_add` => `struct in_addr`, which contains `uint32_t s_addr;` --> 32bits => 4B (4 chars)
+- `hostent.h_addr` => `char*` (char/byte array) returned from `gethostname()`
+- struct `in_addr` is just a `uint32_t` (`s_addr`) and the `hostent h_addr` points to 4 bytes of the IPv4 address; copying those bytes into `sin_addr` yields exactly the right internal representation. So practically it works.
+Preferef safer legacy method implementation:
+```c
+memcpy(&serv_addr.sin_addr, he->h_addr_list[0], he->h_length);
+// Use memcpy not pointer-cast dereference; still, prefer getaddrinfo.
+```
+
+**host-entry:**<br>
+The <netdb.h> header shall define the hostent structure that includes at least the following members:
+(For backward compatibility, a macro h_addr is often defined to point to the first address in the h_addr_list.)
+```c
+struct hostent {
+    char   *h_name       Official name of the host. 
+    char  **h_aliases    A pointer to an array of pointers to 
+                         alternative host names, terminated by a 
+                         null pointer. 
+    int     h_addrtype   Address type. 
+    int     h_length     The length, in bytes, of the address. 
+    char  **h_addr_list  A pointer to an array of pointers to network 
+                         addresses (in network byte order) for the host, 
+                         terminated by a null pointer.
+};
+#define h_addr h_addr_list[0] /* for backward compatibility */
+```

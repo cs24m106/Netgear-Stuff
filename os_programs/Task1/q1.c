@@ -206,7 +206,7 @@ int main(int argc, char **argv) {
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 
-    /* stat files */
+    /* stat files - to store detailed information and attributes about a file (for size comparision)*/
     struct stat st1, st2;
     if (stat(file1, &st1) == -1) { perror("stat file1"); return 3; }
     if (stat(file2, &st2) == -1) { perror("stat file2"); return 3; }
@@ -227,7 +227,8 @@ int main(int argc, char **argv) {
     }
 
     /* create a single System V message queue */
-    int msqid = msgget(IPC_PRIVATE, IPC_CREAT | IPC_EXCL | 0600);
+    int msqid = msgget(IPC_PRIVATE, IPC_CREAT | IPC_EXCL | 0600); 
+    // create new msgque file_id exclusively that is not in use by other processes with ownership (read & write)
     if (msqid == -1) { perror("msgget"); return 4; }
     g_msqid = msqid;
 

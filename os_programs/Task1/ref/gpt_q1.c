@@ -49,15 +49,15 @@ typedef struct {
 } msg_t;
 
 /* Global state for cleanup handlers */
-static int g_msqid = -1;
-static pid_t *g_children = NULL;
-static int g_child_count = 0;
+static int g_msqid = -1; // to store msg-que fid
+static pid_t *g_children = NULL; // array ptr of child pids
+static int g_child_count = 0;   // array count
 
 /* Remove msg queue and optionally kill children */
 static void cleanup_resources(void) {
     if (g_msqid != -1) {
         /* remove message queue */
-        if (msgctl(g_msqid, IPC_RMID, NULL) == -1 && errno != EINVAL) {
+        if (msgctl(g_msqid, IPC_RMID, NULL) == -1 && errno != EINVAL) { // free msgque buf
             perror("msgctl(IPC_RMID)");
         }
         g_msqid = -1;
@@ -65,7 +65,7 @@ static void cleanup_resources(void) {
     if (g_children) {
         for (int i = 0; i < g_child_count; ++i) {
             if (g_children[i] > 0) {
-                kill(g_children[i], SIGTERM);
+                kill(g_children[i], SIGTERM); // terminate childrens
             }
         }
     }
@@ -73,7 +73,7 @@ static void cleanup_resources(void) {
 
 /* SIGINT / SIGTERM handler -> best-effort cleanup and exit */
 static void term_handler(int signo) {
-    (void)signo;
+    (void)signo; // ignore unused variable warning
     cleanup_resources();
     _exit(2);
 }
@@ -81,7 +81,8 @@ static void term_handler(int signo) {
 /* Helper to send a message (wrap msgsnd with error handling) */
 static void send_msg(int msqid, msg_t *m) {
     if (msgsnd(msqid, m, sizeof(msg_t) - sizeof(long), 0) == -1) {
-        /* If parent removed queue, children might get EINVAL; just exit gracefully */
+        /* size of "data" part of the msg_buffer => total struct size - "type" size (long)
+        If parent removed queue, children might get EINVAL; just exit gracefully */
         perror("msgsnd");
         _exit(3);
     }
@@ -233,7 +234,7 @@ int main(int argc, char **argv) {
     g_msqid = msqid;
 
     /* record children */
-    g_children = calloc(num_workers, sizeof(pid_t));
+    g_children = calloc(num_workers, sizeof(pid_t)); // == malloc(num*size(each)) + initialize all bytes to 0
     if (!g_children) { perror("calloc"); cleanup_resources(); return 5; }
     g_child_count = num_workers;
 

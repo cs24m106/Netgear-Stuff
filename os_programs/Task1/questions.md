@@ -28,6 +28,9 @@ When the program returns the status, it should ensure that all the resources tha
 
 In a line with words, if there are multiple separator, replace them by one
 - Break lines that are greater than 100 characters to multiple lines of maximum 100 characters 
-- write the resultant data back to the output file
-
-The prgram should
+- write the resultant data back to the output file.
+- The program should do the above 3 operations in sequence (pipeline fashion), 
+- but the processing should be done parallelly.
+> First implement using threads and then using processes
+ 
+## 4. Implement a thread safe queue, that enques at the head and dequeues at the tail (FIFO)

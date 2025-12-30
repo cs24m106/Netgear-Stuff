@@ -39,7 +39,7 @@ int compareFileContent(char* fname1, char* fname2, int start, int end, int msgid
 
         if(memcmp(buff1, buff2, read_size) != 0){
             msg.mismatch = 1;
-            msgsnd(msgid, &msg, sizeof(int), 0);
+            msgsnd(msgid, &msg, sizeof(int), 0); // size of data part of struct is just another int
             fclose(f1);
             fclose(f2);
             free(buff1); free(buff2);

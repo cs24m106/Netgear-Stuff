@@ -116,6 +116,33 @@ int sig: Indicates the signal to be sent. ex:
 NOTE: By default, child processes created via fork() inherit the parent's Process Group ID (PGID). <br>
 Therefore, `kill(0, ...)` acts as a broadcast to the entire group.
 
+---
+
+## Multi-Threading in C
+- [POSIX Threads](https://www.geeksforgeeks.org/operating-systems/posix-threads-in-os/) --> pthreads
+- use explicit compile options `gcc sourceFile.c -lpthread` if prog shows error. Syntax:
+```c
+int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+                   void *(*start_routine)(void *), void *arg); 
+return 0 or -1 (errno set resp)
+```
+**Parameters:**<br>
+- `thread`: A pointer to a pthread_t variable. A successful call stores the ID of the newly created thread in this location. This ID is used to refer to the thread in other pthreads functions (like `pthread_join()` or `pthread_cancel()`).
+- `attr`: A pointer to a pthread_attr_t structure that specifies thread attributes (e.g., stack size, scheduling policy, detach state). If NULL, default attributes are used (a common practice for most simple applications).
+- `start_routine`: A pointer to the function that the new thread will execute. This function must accept a single void* argument and return a void*.
+- `arg`: A single argument of type void* that is passed to the start_routine function. If multiple arguments are needed, a pointer to a struct containing all arguments can be passed instead. 
+
+```c
+int pthread_join(pthread_t thread, void **value_ptr);
+// is a blocking function; the calling thread is suspended until the specified thread terminates.
+// without thread calls like pthread_join() or pthread_detach() can lead to resource leaks (zombie threads).
+```
+**Parameters**<br>
+- `thread`: The ID of the target thread that the calling thread should wait for. This is the pthread_t value obtained during the call to `pthread_create()`.
+- `value_ptr`: A pointer to a void * variable. Upon the target thread's termination, the value it passed to `pthread_exit()` (or the return value of its starting routine) is stored in the location referenced by `value_ptr`. If you don't need the return value, you can pass NULL. 
+
+---
+
 ## MISC
 
 ### Create Random test files

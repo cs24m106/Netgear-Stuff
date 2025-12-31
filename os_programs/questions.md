@@ -13,12 +13,10 @@ The final result should include
 When the program returns the status, it should ensure that all the resources that was created has been properly released. 
 
 
-
 ## 2. Redo the above programs, 
 - using threads rather than processes, and 
 - continue to use message queues as the ways of communicating between the threads
  
-
 
 ## 3. Write a program that will take a file as an input, 
 - and then perform the following in sequence on the content of the file 
@@ -31,6 +29,7 @@ In a line with words, if there are multiple separator, replace them by one
 - write the resultant data back to the output file.
 - The program should do the above 3 operations in sequence (pipeline fashion), 
 - but the processing should be done parallelly.
-> First implement using threads and then using processes
+
+## 4. First implement using threads and then using processes
  
-## 4. Implement a thread safe queue, that enques at the head and dequeues at the tail (FIFO)
+## 5. Implement a thread safe queue, that enques at the head and dequeues at the tail (FIFO)

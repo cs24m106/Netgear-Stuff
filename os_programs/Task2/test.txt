@@ -1,0 +1,299 @@
+Apply for loan on HIPL app available on Google PlayStore and App Store - Download Now
+
+Quiz
+CSR
+Emi Calculator
+
+Reach Us
+    logo
+            Products 
+                Customer Section
+                    Investors
+                        Web Stories
+                            Blogs
+                                Careers
+                                    About Us
+                                        Apply Now
+                                            logo
+Side menu
+    Home
+        About us
+            Product
+            Careers
+                Reach Us
+                    Web Stories
+                        Blogs
+                            Investors
+                                Quiz
+                                    CSR
+                                        Customer Section
+                                            EMI Calculator
+                                                Apply Now
+Home
+    Blog
+        Used Car Loans
+            BHP vs HP vs WHP:                            What Is the Key Difference?
+            BHP vs HP vs WHP: What Is the Key Difference?
+Used Car Loans
+                            13 January 2025
+                
+                                            8,311
+Page_29_blog_4_BHP_vs_HP_vs_WHP_What_Is_the_Key_Difference.png
+
+Table of Contents
+When you head to the market to buy a new or used car, horsepower is a key measure to gauge its performance. It is the maximum amount of power a car’s engine can generate. While many use BHP, HP, and WHP interchangeably, knowing the difference between the three makes sense to get the best car. 
+
+Keep reading to learn more about HP vs BHP vs WHP, their meaning, calculation methods, and differences to determine a vehicle's output.
+
+What is Horsepower (HP)?
+In simple words, HP is a unit that measures a car engine's power without considering outside factors like friction. However, it is not accurate to gauge a vehicle's capabilities. 
+
+An average vehicle loses 10-20% of its horsepower when it reaches the drive wheels. Therefore, horsepower is inaccurate in calculating a vehicle’s power and performance.
+
+To Avail Used Car Loans
+Apply Now
+How is Horsepower Measured?
+Horsepower or HP is calculated using the engine’s stroke, RPM, and displacement. It is measured at the flywheel. Here is the formula:
+
+1hp = 550ftlb/s
+
+Calculate the amount of force in pounds by the speed in feet per second. So, if a car’s engine generates 200 pounds of force at the speed of 2 feet per second, its horsepower would be 400 hp (200 x 2). It is the indicated horsepower of a vehicle without real-world testing. 
+
+What is Brake Horsepower (BHP)?
+Brake horsepower, or BHP, is a unit to measure an engine’s output before delivery through the transmission and driveline. Therefore, it is a real-world figure of a car engine’s highest possible output at its maximum capacity. 
+
+However, it still loses 15-20% of power due to mechanical wear and friction before reaching the pavement. Despite that, BHP is a more realistic measure of a vehicle’s output than HP.
+
+How is Brake Horsepower Measured?
+A brake-style dynamometer is used to measure a vehicle’s brake horsepower. This device measures a car engine’s output at the flywheel (manual) or flexplate (automatic). Here, the power transfers downstream in a smooth manner. The device applies pressure on the engine similar to real-world conditions and measures the BHP using the torque and rotational speed.
+
+The formula to calculate BHP is (torque x rpm)/5252.
+
+If a bike has a 20 lb-ft torque at 5,000 rpm, its BHP will be (torque*rpm)/5252 = 19.04 bhp.
+
+What Is Wheel Horsepower (WHP)?
+To understand brake HP vs wheel HP, understand that WHP or Wheel Horsepower measures the output a vehicle produces and puts at its drive wheels to the pavement. It is the most accurate unit to measure a vehicle's output since it also considers outside forces like mechanical wear and friction, leading to power loss.
+
+Consequently, a vehicle has the maximum chance to produce its recorded WHP in real-world driving conditions. 
+
+How is Wheel Horsepower Measured?
+WHP in cars is a vehicle’s horsepower measured at the rear wheels. It requires a chassis dynamometer that uses a roller underneath the driver's wheels to record its rotational speed and torque. This equipment is available in many speed and performance shops popular among the drag racing communities. 
+
+The formula to calculate WHP is WHP=EHP/DTLF.
+
+EHP is the Engine Horsepower, and DTLF is the DriveTrain Loss Factor. Calculate WHP by dividing the EHP by DTLF.
+
+Which Horsepower Can Car Manufacturers Use?
+Most car manufacturers use BHP to measure and advertise their vehicle output. While it accurately determines the engine’s actual output, it does not indicate the power delivery to the rear wheels. However, the methods of calculating and testing the BHP are far more accurate than earlier, coming closer to the power in real-world driving conditions. 
+
+Earlier, the testing methods used non-production headers without any belt-driven accessories like a power steering pump and alternator. Today, this practice is no longer in use, providing consumers with more accurate performance data. 
+
+Comparison Between: BHP vs WHP vs HP
+Let’s look at the difference between horsepower and BHP and WHP:
+
+Parameter	HP	BHP	WHP
+Meaning
+
+Power generated at the flywheel
+
+Power delivery before reaching the driveline
+
+Power delivery at the wheels and pavement
+
+Accuracy
+
+Inaccurate
+
+More accurate
+
+Most accurate
+
+Formula to 
+
+Calculate 
+
+1hp = 550ftlb/s
+
+BHP=(torque x rpm)/5252
+
+WHP=EHP/DTLF
+
+Device Used for Measurement
+
+Engine dynamometer
+
+Brake-style dynamometer
+
+Chassis dynamometer
+
+Determining Factors
+
+Air pressure, air temperature, fuel quality, engine wear, engine design, etc.
+
+Engine size, weight, tyres, gearbox, aerodynamics, etc.
+
+Speed of wheels without taking rolling resistance and aerodynamic drag into account.
+
+Conclusion
+HP is the vehicle’s power at the flywheel, BHP tries to measure the power after considering loss from attachments, and WHP (meaning in a car) uses a standard dynamometer to measure the power the wheels actually receive. 
+
+Now that you know the difference between horsepower vs wheel horsepower vs brake horsepower, you can choose a new or used car with your desired power output. When it comes to a pre-owned car, you can finance up to 175% (Rs 50 Lakh) of its purchase with a Used Car Loan from Hero FinCorp. You can get the best Used Car Loan interest rate, starting at 13.5%, with flexible tenures (12-60 months), keeping the purchase affordable and EMIs manageable.
+
+Frequently Asked Questions
+1. What is better, BHP or HP?
+
+BHP is more accurate for measuring a car engine's power output after considering friction and mechanical wear loss.
+
+2. Is WHP the same as HP?
+
+HP is the power generated at the flywheel, while WHP is the power that reaches the car’s wheels.
+
+3. How much WHP is one HP?
+
+One HP is equal to 746 watts.
+
+4. How do you convert HP to WHP?
+
+To calculate WHP, divide the HP by the drivetrain loss factor.
+
+Disclaimer: The materials provided are for information purposes only and is further based on research and may vary depending on factors such as rounding methods or regional measurement standards. Users are encouraged to verify the accuracy of conversions through additional sources if precision is critical.
+
+To Avail Used Car Loans
+Apply Now
+author_dp_dash_31c308b8c1 (1).webp
+Written by:
+
+
+dash is a finance expert with a focus on the non-banking financial sector, bringing over 8 years of experience in NBFC. She specializes in simplifying complex financial concepts for readers, helping them navigate the NBFC landscape. Outside of work, she is passionate about travelling.
+
+View Profile
+Find them on :
+
+li.svg
+Used Car Loan iconApply For Used Car Loan
+Personal Loan iconApply For Personal Loan
+Loan Against Property iconApply For Loan Against Property
+Two Wheeler Loan iconApply For Two Wheeler Loan
+Business Loan iconApply For Business Loan
+Loyalty Loan iconApply For Loyalty Loan
+New Car Loan iconApply For New Car Loan
+Popular
+Recent
+Categories
+Page_106_blog_5_How_to_Track_Personal_Loan_Application_Status_Online.png
+Personal Loan
+How to Track Personal Loan Application Status Online?
+Personal Loans are the best funding options for people who need cash quickly for various expenses. These are collateral-free loans with no end-use restrictions. 
+
+
+Did You Know
+Disbursement
+The act of paying out money for any kind of transaction is known as disbursement. From a lending perspective this usual implies the transfer of the loan amount to the borrower. It may cover paying to operate a business, dividend payments, cash outflow etc. So if disbursements are more than revenues, then cash flow of an entity is negative, and may indicate possible insolvency.
+
+support-icon.webp
+SUPPORT
+whatsapp-icon.webp
+WHATSAPP
+playstore.webp
+GET HIPL APP
+Products
+Personal Loan
+Business Loan
+Two Wheeler Loan
+Used Car Loan
+Loan Against Property
+Loyalty Loan
+New Car Loan
+Personal Loan By Location
+Business Loan By Location
+Two Wheeler Loan By Location
+Used Car Loan By Location
+Loan Against Property By Location
+Loan By Amount
+Loan By Salary
+Calculators
+Application Form
+Credit/Cibil Score
+Quick Pay
+Products on EMI
+logo
+We are one of India's fastest growing NBFCs, disbursing a loan every 30 seconds.
+
+About Us
+Hero FinCorp Journey
+CEO‘s Message
+Board of Directors
+Leadership Team
+Data Privacy Policy
+Certification & Membership
+Company Policies
+DLG HIPL 
+Digi LPL 
+Download the App
+hero qr
+playstorelogo
+playstorelogo
+Follow us
+CIN: U74899DL1991PLC046774
+Join our Newsletter list
+Enter your Email ID
+Subscribe Newsletter
+Investors
+Financial Performance
+Notices & Intimations
+Unclaimed & Unpaid Dividend
+Statutory Compliances
+Investor Contact
+Press / Media
+Link to SMART ODR
+SEBI Circular on Online Dispute Resolution
+Reach us
+Customer Care
+Offices
+Dealers
+Dealer Login
+Sitemap
+Disclaimer
+Careers
+Online EMI Payment T&Cs
+Our LSPs and DLAs
+footer Image
+footer Image
+footer Image
+footer Image
+greatplacetowork
+IRDAI License No :CA0474
+Validity of Current License: 22-03-2023 to 21-03-2026 Category of License: Corporate Agent (Composite)
+
+Our Address
+CORPORATE OFFICE
+09, Basant Lok, Vasant Vihar, New Delhi - 110057
+Tel. +91-11-49487150
+Fax. +91-11-49487197, +91-11-49487198
+
+OPERATION CENTER
+A-44, Mohan Co-Operative Industrial Estate, Near Mohan Estate Metro Station, Mathura Road, New Delhi , 110044 – India
+
+
+Connect With Us
+RETAIL CUSTOMER CARE HELP
+ 1800-102-4145
+
+Customer.Care@HeroFinCorp.com
+
+9:30 AM - 6:30 PM, Monday to Saturday
+
+CORPORATE CUSTOMER CARE HELP
+1800-103-5271 (Toll Free)
+
+Corporate.Care@HeroFinCorp.com
+
+10:00 AM - 6:00 PM, Monday to Friday and on the last two Saturdays of the month.
+
+For any grievance, please refer to our Grievance Redressal Policy
+ISO 27001:2022 Certified
+
+Insurance Regulatory & Development Authority of India has granted Hero Fincorp Ltd. India the authorization to act as a Corporate Agent (Registration No. CA0474) until March’26, for soliciting and procuring General, Health, and Life Insurance business. Insurance contracts are established exclusively between the insurer and the insured. Hero Fincorp Ltd. does not act as insurer nor participate in or underwrite the underlying risks.
+
+© Hero Fincorp 2022 | All Rights Reserved
+

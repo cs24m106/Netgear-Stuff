@@ -46,7 +46,7 @@ void readFileToBlocks(FILE* f, int len, int n, char** content){
     char* block;
 
     for(int i=0;i<(len/n + 1);i++){
-        content[i] = (char*) malloc(sizeof(char)*100);
+        content[i] = (char*) malloc(sizeof(char)*n);
         fread(content[i], sizeof(char), n,f);
     }
     fclose(f);

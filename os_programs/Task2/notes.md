@@ -1,0 +1,2 @@
+- `strlen()` function does not count the null character (\0). thus allocate memory for lenth+1 and assign `buffer[length] = '\0'`
+- `isspace()` function: This standard library function (from `ctype.h`) checks if a character is a whitespace character (space, tab, newline, etc.).

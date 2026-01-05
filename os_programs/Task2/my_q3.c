@@ -22,7 +22,7 @@ typedef struct msg_buffer{ // for better accessibility without having to add pre
 
 /* Shared control state (all read only) */
 static size_t block_size;
-static size_t chunk_size;
+static size_t file_size;
 static unsigned int line_len;
 static char** shared_content; // r&w
 
@@ -36,28 +36,43 @@ unsigned int CountOccurences(const char* line, const char* word){
     return n;
 }
 
-// inplace replace text for all occurances
-char* ReplaceText(char* line, const char* text, const unsigned int count, const char* rtxt){
-    char* line = *line;
-    int slen = strlen(line);
-    int wlen = strlen(text);
+// inplace replace text for all occurances (pass by ref)
+void ReplaceText(char** str, const char* text, const unsigned int count, const char* rtxt){
+    char *line = *str;
+    int slen = strlen(line); // string length
+    int wlen = strlen(text); // word length
     if (count == 0) return;
     
-    int rlen = strlen(rtxt);
-    int nlen = slen + count * (rlen - wlen);
-    char* rline = malloc(sizeof(char) * (nlen+1)); // add 1 for '\0' so that strlen fn can work properly
+    int rlen = strlen(rtxt); // replacing word length
+    int nlen = slen + count * (rlen - wlen) + 1; // replacing string length
+    // add 1 for '\0' so that strlen fn can work properly
+    char* rline = malloc(sizeof(char) * nlen);
     
     int i = 0;
     while (*line){
-        if(strstr(line,text) == line){
+        const char* index = strstr(line,text);
+        if(index == line){
             strcpy(&rline[i],rtxt);
             i += rlen;
             line += wlen;
-        }else{
-            rline[i++] = *line++;
+        }else if(index)
+        {
+            size_t shift = index - line;
+            strncpy(&rline[i], line, shift);
+            i+= shift;
+            line = (char*)index;
+        }
+        else{
+            size_t leftover = strlen(line);
+            strncpy(&rline[i], line, leftover);
+            i += leftover;
+            line += leftover;
         }
     }
-    return rline;
+    rline[i] = '\0';
+    free(*str); // free up prev buffer
+    *str = rline;
+    // realloc might not guarentee same pointer location all the time
 }
 
 void CompressSeparators(char *str) {
@@ -66,17 +81,17 @@ void CompressSeparators(char *str) {
 
     while (*read_ptr) {
         if (*read_ptr == '\n'){
-            if (*(read_ptr-1) == '-'){ // hiphen as last char of a line => word continued onto next, 
+            if (read_ptr > str && *(read_ptr-1) == '-'){ // hiphen as last char of a line => word continued onto next, 
                 write_ptr--;// ignore both '-' and '\n'
                 read_ptr++;
                 continue;
             }
             *write_ptr++ = '\n'; // compress multiple newlines
-            while(isspace((unsigned char)*read_ptr++));
+            while(isspace((unsigned char)*++read_ptr));
         }
-        else if (isspace((unsigned char)*read_ptr++)) {
+        else if (isspace((unsigned char)*read_ptr)) {
             *write_ptr++ = ' '; // compress white spaces
-            while(isspace((unsigned char)*read_ptr++));
+            while(isspace((unsigned char)*++read_ptr));
         } else {
             *write_ptr++ = *read_ptr++; // copy non-white space characters as it is
         }
@@ -97,9 +112,11 @@ char* FormatLineBreaks(char *str, int max_len){
         int len; // nbreaks;
         while(rstream != nxtl){
             len = (int)(nxtl - rstream);
-            //nbreaks = (len + max_len -1) * (max_len);
-
-            if (len > max_len){
+            
+            if (len==1){ // skip multiple readlines if any
+                rstream++; break;
+            }
+            else if (len > max_len){
                 char *peek = rstream + max_len;
                 // peek till next whitespace to add line break
                 while(peek>rstream && !isspace((unsigned char)*peek)) peek--; 
@@ -107,20 +124,20 @@ char* FormatLineBreaks(char *str, int max_len){
                 if (peek == rstream) {
                     // Special Case: Word is longer than max_len;
                     len = max_len - strlen(LINE_SPLITTER);
-                    memcpy(wstream, rstream, sizeof(char)*len);
+                    strncpy(wstream, rstream, len);
                     rstream += len; wstream += len;
                     strcpy(wstream, LINE_SPLITTER); 
                     wstream += strlen(LINE_SPLITTER);    
                 }
                 else {
                     len = (int)(peek - rstream);
-                    memcpy(wstream, rstream, sizeof(char)*len);
+                    strncpy(wstream, rstream, len);
                     rstream = peek+1; wstream += len;
                     *wstream++ = '\n';
                 }
             }
             else {
-                memcpy(wstream, rstream, sizeof(char)*len);
+                strncpy(wstream, rstream, len);
                 rstream += len; wstream += len;
             }
         }
@@ -131,38 +148,45 @@ char* FormatLineBreaks(char *str, int max_len){
 }
 
 // child/worker fn handler
-void* compareFileContent(void *args)
+void* replaceFileContent(void *args)
 {
     ThreadsArg *targs = (ThreadsArg *) args;    
-    FILE *f = fopen(targs->fname,"r");
     size_t bytes_read, start;    
     
     start = targs->base + targs->tno * block_size;
+    if (start > file_size) return NULL; // break if seek point is beyond eof
+
+    FILE *f = fopen(targs->fname,"r");
     fseek(f, start, SEEK_SET);
-    printf("1. Child worker (TID:%d) initiated with block[start:%010lu,end:%010lu] successfully!\n", 
+    printf("1. Child(TID:%d) initiated with block[start:%010lu,end:%010lu] successfully!\n", 
         targs->tno, start, start+block_size);
     
-    // READ FILE INPUT
+    // 1. READ FILE INPUT
     targs->n_changes = 0;
     char* buf = malloc(sizeof(char) * (block_size+1)); // read onto shared buffer and replace directly on it
     bytes_read = fread(buf, sizeof(char), block_size, f);
     fclose(f); buf[bytes_read] = '\0'; // to handle EOF
-    
-    // 1. Compress Separators
-    CompressSeparators(buf);
+    //printf(">>> (TID:%d) inital addr: %p\n", targs->tno, buf);
 
-    // 2. Replace Word
+    // 2. Compress Separators
+    CompressSeparators(buf);
+    printf("2. Child(TID:%d): CompressSeparators done!\n", targs->tno);
+
+    // 3. Replace Word
     targs->n_changes += CountOccurences(buf, targs->word1);
-    char* rbuf = ReplaceText(&buf, targs->word1, targs->n_changes, targs->word2);
+    ReplaceText(&buf, targs->word1, targs->n_changes, targs->word2);
+    printf("3. Child(TID:%d): ReplaceText done!\n", targs->tno);
+
+    // 4. Line Breaks
+    char* fbuf = FormatLineBreaks(buf, line_len);
     free(buf);
+    printf("4. Child(TID:%d): FormatLineBreaks done!\n", targs->tno);
     
-    // 3. Line Breaks
-    char* fbuf = FormatLineBreaks(rbuf, line_len);
-    free(rbuf);
-    shared_content[targs->tno] = fbuf;
-    
-    printf("2. Child Thread (TID:%d) completed with no.of replaced words = %d!\n", 
-        pthread_self(), targs->n_changes);
+    //printf(">>> (TID:%d) final addr: %p\n", targs->tno, buf);
+    shared_content[targs->tno] = fbuf; // save ref onto share buffer
+    printf("5. Child(TID:%d) fully completed with no.of replaced words = %d!\n", 
+        targs->tno, targs->n_changes);
+    return NULL;
 }
 
 
@@ -184,11 +208,11 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    const char *file = argv[1];
+    const char *fname = argv[1];
     const char *word1 = argv[2];
     const char *word2 = argv[3];
-    int num_t = atoi(argv[4]);
-    if (num_t <= 0) num_t = 1;
+    int n_threads = atoi(argv[4]);
+    if (n_threads <= 0) n_threads = 1;
 
     block_size = DEF_BLOCK_SIZE;
     if (argc >= 6) {
@@ -200,48 +224,59 @@ int main(int argc, char **argv) {
         int tmp = atoi(argv[6]);
         if (tmp > 0) line_len = tmp;
     }
-    size_t len = FileLen(file);
-    printf("Bytes read in File: %ld\n",len);
+    file_size = FileLen(fname);
+    printf("Bytes read in File: %ld\n",file_size);
 
-    chunk_size = num_t * block_size;
-    unsigned int n_chunks = (len + chunk_size - 1)/chunk_size; // round up / ceil
-    shared_content = (char**) malloc(sizeof(char*) * num_t);
+    unsigned int n_blocks = (file_size + block_size - 1)/block_size; // round up / ceil
+    unsigned int n_loop = (n_blocks + n_threads - 1)/n_threads;
+    shared_content = (char**) malloc(sizeof(char*) * n_threads);
     
-    pthread_t *threads = malloc(num_t* sizeof(pthread_t));
-    ThreadsArg *targs = malloc(num_t * sizeof(ThreadsArg));
+    pthread_t *threads = malloc(n_threads* sizeof(pthread_t));
+    ThreadsArg *targs = malloc(n_threads * sizeof(ThreadsArg));
 
-    printf("Files sizes are same, checking incontents...\n"
-        "...block by block (block_size=%lu) per process (num_processes=%d).\n"
-        "Each process read equally split sections (size:%ld) of the file.\n\n", block_size, num_t, segement_size);
+    printf("Given Config: block_size=%lu, num_processes=%d.\n"
+            "No. of blocks:%u, No. of loops:%u.\n\n", block_size, n_threads, n_blocks, n_loop);
     
-    for(int i=0;i<num_t;i++){
-        targs[i].fname1 = file1;
-        targs[i].fname2 = file2;
-        targs[i].start = i*segement_size;
-        targs[i].end = (i==num_t-1) ? len1 : (i+1)*segement_size; // handle last process excess data
-        pthread_create(&threads[i], NULL, compareFileContent, &targs[i]);
+    size_t base=0, multiple = n_threads*block_size;
+    char new_fname[20], *block_content;
+    int fnlen = strlen(fname);
+    strncpy(new_fname, fname, fnlen); new_fname[fnlen] = '\0';
+    strcat((char*)new_fname,"_rnew.txt");
+    FILE *rnew_file = fopen(new_fname, "w");
+
+    int total_changes = 0; // total no.of replaced texts
+    for(unsigned int k=0; k<n_loop; k++){
+        memset(shared_content, 0, sizeof(char*) * n_threads); // reset to keep track of processed data
+
+        for(int i=0;i<n_threads;i++){            
+            targs[i].fname = fname;
+            targs[i].word1 = word1;
+            targs[i].word2 = word2;
+            targs[i].tno = i;
+            targs[i].base = base;
+            pthread_create(&threads[i], NULL, replaceFileContent, &targs[i]);
+        }
+        
+        //wait for threads to complete
+        for(int i=0;i<n_threads;i++){
+            pthread_join(threads[i],NULL);
+            total_changes += targs[i].n_changes;
+        }        
+        base += multiple;
+
+        // write-back all processed thread-block content onto new file from main thread only
+        for(int i=0; i<n_threads;i++){
+            if (shared_content[i] != NULL) {
+
+                block_content = shared_content[i];
+                //printf(">>> tid:%d, new addr: %p\n", i, block_content);
+                if(strlen(block_content) > 0)
+                    fputs(block_content,rnew_file);
+                free(block_content);
+            }
+        }
     }
-
-    //wait for threads to complete
-    for(int i=0;i<num_t;i++){
-        pthread_join(threads[i],NULL); 
-        // no need for signal/pthread_cancel as once mismatch flag is set automatically all threads stop processing
-    }
-
-    int total_blocks = 0; // total no.of blocks actually processed
-
-    for(int i=0;i<num_t;i++){
-        total_blocks += targs[i].blocks;
-    }
-
+    fclose(rnew_file);
     free(threads); free(targs);
-    //free(fname1); free(fname2); // clean up buffers used to store filenames
-    
-    if(!mismatch_flag){
-        printf("\nSUCCESS...No Mismatch Found! ");
-    }
-    else{
-        printf("\nFAILURE...Mismatch Found! ");
-    }
-    printf("Num of Blocks Processed: %d, using %d no.of processes.\n", total_blocks, num_t);
+    printf("\nNum of changes applied: %d, using %d no.of threads.\n", total_changes, n_threads);
 }

@@ -1,2 +1,4 @@
 - `strlen()` function does not count the null character (\0). thus allocate memory for lenth+1 and assign `buffer[length] = '\0'`
 - `isspace()` function: This standard library function (from `ctype.h`) checks if a character is a whitespace character (space, tab, newline, etc.).
+- `realloc()`: https://stackoverflow.com/questions/63535667/is-it-safe-to-call-realloc-on-the-pointer-you-pass-into-function-itself
+- `strcat`: does not use realloc internally. The function operates on the existing memory block of the destination string, and it is the programmer's responsibility to ensure that this destination buffer is large enough to hold the concatenated result. 

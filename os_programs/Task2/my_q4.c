@@ -1,80 +1,192 @@
-#define _GNU_SOURCE // issue with sigaction not recognized error https://github.com/Microsoft/vscode/issues/71012 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
 #include <strings.h>
 #include <unistd.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
-#include <sys/wait.h>
 #include <sys/stat.h>
-#include <stdbool.h>
+#include <ctype.h>
+#include <pthread.h>
 
 #define DEF_BLOCK_SIZE 1024
+#define MAX_BLOCK_SIZE block_size*2
+#define DEF_LINE_LENGTH 100
+#define LINE_SPLITTER "-\n"
 
 typedef struct msg_buffer{ // for better accessibility without having to add prefix struct in std declaration
-    long mtype; // long "type" --> must required, any memeber below is "data" part
-    pid_t pid; // fork distinguisher, for parent = 0, for all childs = getpid()
-    bool mismatch;
-    int blocks;
-} msg_buffer; // // use typedef for alias on same struct name itself
+    const char* fname;
+    const char* word1;
+    const char* word2;
+    size_t base;
+    unsigned int n_changes; // no.of words replaced
+} ThreadsArg; // // use typedef for alias on same struct name itself
 
-msg_buffer msg;// global msg_buf for interupt handler access
-int msgid; // global msg_que_id for interupt handler access
+/* global control state (all read only) */
+static unsigned int pno; // local process number (parent id:-1)
+static size_t block_size;
+static size_t file_size;
+static unsigned int line_len;
+static char* shared_content; // ipc r&w with each process max shm[block_size*2]
+static unsigned int *n_changes;
 
-static void send_msg(int msqid, msg_buffer *m) {
-    if (msgsnd(msqid, m, sizeof(msg_buffer) - sizeof(long), 0) == -1) {
-        /* size of "data" part of the msg_buffer => total struct size - "type" size (long)
-        If parent removed queue, children might get EINVAL; just exit gracefully */
-        perror("msgsnd");
-        exit(EXIT_FAILURE);
+unsigned int CountOccurences(const char* line, const char* word){
+    unsigned int n=0, len=strlen(word);
+    const char *p = line;
+    while ((p = strstr(p, word)) != NULL) {
+        n++;
+        p += len;
     }
+    return n;
 }
 
-static void term_handler(int signo) { // termination handler for childrens (when parent calls kill)
-    (void)signo; // ignore unused variable warning
-    msg.mismatch = true; // update mismatch as termination reqestion bool when parent calls kill
+// inplace replace text for all occurances (pass by ref)
+void ReplaceText(char** str, const char* text, const unsigned int count, const char* rtxt){
+    char *line = *str;
+    int slen = strlen(line); // string length
+    int wlen = strlen(text); // word length
+    if (count == 0) return;
+    
+    int rlen = strlen(rtxt); // replacing word length
+    int nlen = slen + count * (rlen - wlen) + 1; // replacing string length
+    // add 1 for '\0' so that strlen fn can work properly
+    char* rline = malloc(sizeof(char) * nlen);
+    
+    int i = 0;
+    while (*line){
+        const char* index = strstr(line,text);
+        if(index == line){
+            strcpy(&rline[i],rtxt);
+            i += rlen;
+            line += wlen;
+        }else if(index)
+        {
+            size_t shift = index - line;
+            strncpy(&rline[i], line, shift);
+            i+= shift;
+            line = (char*)index;
+        }
+        else{
+            size_t leftover = strlen(line);
+            strncpy(&rline[i], line, leftover);
+            i += leftover;
+            line += leftover;
+        }
+    }
+    rline[i] = '\0';
+    free(*str); // free up prev buffer
+    *str = rline;
+    // realloc might not guarentee same pointer location all the time
 }
 
+void CompressSeparators(char *str) {
+    char *read_ptr = str;
+    char *write_ptr = str;
+
+    while (*read_ptr) {
+        if (*read_ptr == '\n'){
+            if (read_ptr > str && *(read_ptr-1) == '-'){ // hiphen as last char of a line => word continued onto next, 
+                write_ptr--;// ignore both '-' and '\n'
+                read_ptr++;
+                continue;
+            }
+            *write_ptr++ = '\n'; // compress multiple newlines
+            while(isspace((unsigned char)*++read_ptr));
+        }
+        else if (isspace((unsigned char)*read_ptr)) {
+            *write_ptr++ = ' '; // compress white spaces
+            while(isspace((unsigned char)*++read_ptr));
+        } else {
+            *write_ptr++ = *read_ptr++; // copy non-white space characters as it is
+        }
+    }
+    *write_ptr = '\0'; // Null-terminate the resulting string
+}
+
+char* FormatLineBreaks(char *str, int max_len){
+    int max_breaks = ((strlen(str) + max_len -1) / (max_len));
+    char *fstr = malloc(sizeof(char) * (strlen(str) + (max_breaks*strlen(LINE_SPLITTER)) + 1));
+    char *rstream = str; 
+    char *wstream = fstr;
+
+    while(*rstream != '\0'){
+        const char *nxtl = strchr(rstream, '\n'); // next new line
+        if (nxtl == NULL) nxtl = rstream + strlen(rstream); // if not found
+        
+        int len; // nbreaks;
+        while(rstream != nxtl){
+            len = (int)(nxtl - rstream);
+            
+            if (len==1){ // skip multiple readlines if any
+                rstream++; break;
+            }
+            else if (len > max_len){
+                char *peek = rstream + max_len;
+                // peek till next whitespace to add line break
+                while(peek>rstream && !isspace((unsigned char)*peek)) peek--; 
+                
+                if (peek == rstream) {
+                    // Special Case: Word is longer than max_len;
+                    len = max_len - strlen(LINE_SPLITTER);
+                    strncpy(wstream, rstream, len);
+                    rstream += len; wstream += len;
+                    strcpy(wstream, LINE_SPLITTER); 
+                    wstream += strlen(LINE_SPLITTER);    
+                }
+                else {
+                    len = (int)(peek - rstream);
+                    strncpy(wstream, rstream, len);
+                    rstream = peek+1; wstream += len;
+                    *wstream++ = '\n';
+                }
+            }
+            else {
+                strncpy(wstream, rstream, len);
+                rstream += len; wstream += len;
+            }
+        }
+        if (*rstream == '\n') *wstream++ = *rstream++;
+    }
+    *wstream = '\0'; // Null-terminate the resulting string
+    return fstr;
+}
 
 // child/worker fn handler
-void compareFileContent(const char* fname1, const char* fname2, size_t start, size_t end, size_t blocksize)
-{
-    msg.pid = getpid();
-    printf("1. Child worker (PID:%d) initiated with block[start:%010lu,end:%010lu] successfully!\n", msg.pid, start, end);
-
-    FILE *f1, *f2;   
-    f1 = fopen(fname1,"r");
-    f2 = fopen(fname2,"r");
-    fseek(f1, start, SEEK_SET);
-    fseek(f2, start, SEEK_SET);
+void* replaceFileContent(const char* fname, const char* word1, const char* word2, size_t base)
+{  
+    size_t bytes_read, start;    
     
-    char *buf1 = malloc(sizeof(char)*blocksize);
-    char *buf2 = malloc(sizeof(char)*blocksize);
-    size_t curr = start;
+    start = base + pno * block_size;
+    if (start > file_size) return NULL; // break if seek point is beyond eof
 
-    while (curr < end){
-        if (msg.mismatch) break; // break if mismatch is already found by other processes
-        // i.e. parent term req means evident tat mismatch found already
-
-        int read_size = (end - curr < blocksize) ? end-curr : blocksize;
-        fread(buf1, 1, read_size, f1);
-        fread(buf2, 1, read_size, f2);
-        msg.blocks++;
-
-        if(memcmp(buf1, buf2, read_size) != 0){
-            msg.mismatch = true;
-            break;
-        }
-        curr += read_size;
-    }
+    FILE *f = fopen(fname,"r");
+    fseek(f, start, SEEK_SET);
+    printf("1. Child(TID:%d) initiated with block[start:%010lu,end:%010lu] successfully!\n", 
+        pno, start, start+block_size);
     
-    send_msg(msgid, &msg); // send proccessed data before exiting
-    fclose(f1); fclose(f2);
-    free(buf1); free(buf2);
-    printf("2. Child Process (PID:%d) %s with no.of processed blocks = %d!\n", msg.pid, (curr!=end)?"terminated":"completed", msg.blocks);
-    exit(0); // exit on child
+    // 1. READ FILE INPUT
+    char* buf = malloc(sizeof(char) * (block_size+1)); // read onto shared buffer and replace directly on it
+    bytes_read = fread(buf, sizeof(char), block_size, f);
+    fclose(f); buf[bytes_read] = '\0'; // to handle EOF
+    //printf(">>> (TID:%d) inital addr: %p\n", pno, buf);
+
+    // 2. Compress Separators
+    CompressSeparators(buf);
+    printf("2. Child(TID:%d): CompressSeparators done!\n", pno);
+
+    // 3. Replace Word
+    n_changes[pno] = CountOccurences(buf, word1);
+    ReplaceText(&buf, word1, n_changes[pno], word2);
+    printf("3. Child(TID:%d): ReplaceText done!\n", pno);
+
+    // 4. Line Breaks
+    char* fbuf = FormatLineBreaks(buf, line_len);
+    free(buf);
+    printf("4. Child(TID:%d): FormatLineBreaks done!\n", pno);
+    
+    //printf(">>> (TID:%d) final addr: %p\n", pno, buf);
+    shared_content[pno] = fbuf; // save ref onto share buffer
+    printf("5. Child(TID:%d) fully completed with no.of replaced words = %d!\n", 
+        pno, n_changes[pno]);
+    return NULL;
 }
 
 
@@ -91,104 +203,80 @@ size_t FileLen(const char *file){
 }
 
 int main(int argc, char **argv) {
-    if (argc < 4 || argc > 5) {
-        fprintf(stderr, "Usage: %s <file1> <file2> <num_workers> [block_size]\n", argv[0]);
+    if (argc < 5 || argc > 7) {
+        fprintf(stderr, "Usage: %s <file> <word1> <word2> <num_workers> [block_size] [line_len]\n", argv[0]);
         return 1;
     }
 
-    const char *file1 = argv[1];
-    const char *file2 = argv[2];
-    int max_p = atoi(argv[3]);
-    if (max_p <= 0) max_p = 1;
+    const char *fname = argv[1];
+    const char *word1 = argv[2];
+    const char *word2 = argv[3];
+    int n_threads = atoi(argv[4]);
+    if (n_threads <= 0) n_threads = 1;
 
-    size_t block_size = DEF_BLOCK_SIZE;
-    if (argc == 5) {
-        long tmp = atol(argv[4]);
+    block_size = DEF_BLOCK_SIZE;
+    if (argc >= 6) {
+        long tmp = atol(argv[5]);
         if (tmp > 0) block_size = (size_t)tmp;
     }
-
-    size_t len1 = FileLen(file1);
-    size_t len2 = FileLen(file2);    
-    printf("Bytes read in F1: %ld\n",len1);
-    printf("Bytes read in F2: %ld\n",len2);
-    
-    if(len1 != len2){
-        printf("Files differ in size.\n");
-        printf("Failure...\nNumber of Process used = 1\n");
-        exit(1);
+    line_len = DEF_LINE_LENGTH;
+    if (argc == 7) {
+        int tmp = atoi(argv[6]);
+        if (tmp > 0) line_len = tmp;
     }
+    file_size = FileLen(fname);
+    printf("Bytes read in File: %ld\n",file_size);
 
-    msgid = msgget(IPC_PRIVATE, 0666 | IPC_CREAT);
-    size_t segement_size = len1/max_p;
-    size_t start,end;
-
-    printf("Files sizes are same, checking incontents...\n"
-        "...block by block (block_size=%lu) per process (num_processes=%d).\n"
-        "Each process read equally split sections (size:%ld) of the file.\n\n", block_size, max_p, segement_size);
+    unsigned int n_blocks = (file_size + block_size - 1)/block_size; // round up / ceil
+    unsigned int n_loop = (n_blocks + n_threads - 1)/n_threads;
+    shared_content = (char**) malloc(sizeof(char*) * n_threads);
     
-    // termination signal handler mainly for childrens
-    struct sigaction sa;
-    sa.sa_handler = term_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGTERM, &sa, NULL);
-    //sigaction(SIGINT, &sa, NULL);
+    pthread_t *threads = malloc(n_threads* sizeof(pthread_t));
+    ThreadsArg *targs = malloc(n_threads * sizeof(ThreadsArg));
 
-    // use global msg struct for term hander to send blocks processed before exiting
-    msg.mtype = 1;
-    msg.pid = 0;
-    msg.mismatch = false;
-    msg.blocks = 0;
-    setbuf(stdout, NULL); // Disable buffering on stdout. why? to view child's debug printfs before it gets killed
+    printf("Given Config: block_size=%lu, num_processes=%d.\n"
+            "No. of blocks:%u, No. of loops:%u.\n\n", block_size, n_threads, n_blocks, n_loop);
+    
+    size_t base=0, multiple = n_threads*block_size;
+    char new_fname[20], *block_content;
+    int fnlen = strlen(fname);
+    strncpy(new_fname, fname, fnlen); new_fname[fnlen] = '\0';
+    strcat((char*)new_fname,"_rnew.txt");
+    FILE *rnew_file = fopen(new_fname, "w");
 
-    int num_p = 0;
-    for(;num_p<max_p;){
-        /*if (msg.mismatch) {
-            printf("Process Forking interupted inbetween as mismatch flag already received\n");
-            break;
-        }*/
-        start = num_p*segement_size;
-        end = (num_p==max_p-1) ? len1 : (num_p+1)*segement_size; // handle last process excess data
+    int total_changes = 0; // total no.of replaced texts
+    for(unsigned int k=0; k<n_loop; k++){
+        memset(shared_content, 0, sizeof(char*) * n_threads); // reset to keep track of processed data
 
-        int fpid  = fork();
-        if (fpid   < 0) {
-            perror("fork failed");
-            exit(EXIT_FAILURE);
+        for(int i=0;i<n_threads;i++){            
+            targs[i].fname = fname;
+            targs[i].word1 = word1;
+            targs[i].word2 = word2;
+            targs[i].tno = i;
+            targs[i].base = base;
+            pthread_create(&threads[i], NULL, replaceFileContent, &targs[i]);
         }
-        else num_p++;
-        if(fpid   == 0){
-            compareFileContent(file1, file2, start, end, block_size); // child fn must have exit at end of fn
-        }
-        //printf("%d",num_p);
-    }
-    //printf("\nAll child workers have been initialized successfully\n\n");
+        
+        //wait for threads to complete
+        for(int i=0;i<n_threads;i++){
+            pthread_join(threads[i],NULL);
+            total_changes += targs[i].n_changes;
+        }        
+        base += multiple;
 
-    int fin_childs = 0; // no. of childs finished sending back msgs of processed 
-    bool p_mismatch = false;
-    int t_blocks = 0; // total no.of processed blocks
+        // write-back all processed thread-block content onto new file from main thread only
+        for(int i=0; i<n_threads;i++){
+            if (shared_content[i] != NULL) {
 
-    while(fin_childs < num_p){
-        if(msgrcv(msgid, &msg, sizeof(msg_buffer) - sizeof(long), 1, IPC_NOWAIT) != -1){
-            if(msg.mismatch && !p_mismatch){ // update and send kill signal only once
-                p_mismatch = true;
-                kill(0, SIGTERM); // kills all processes along with parent (but only parent is set to ignore killsignal)
+                block_content = shared_content[i];
+                //printf(">>> tid:%d, new addr: %p\n", i, block_content);
+                if(strlen(block_content) > 0)
+                    fputs(block_content,rnew_file);
+                free(block_content);
             }
-            printf("3. Parent ipc.msg recv from (pid:%d) with no.of processed blocks:%d\n",msg.pid, msg.blocks);
-            t_blocks += msg.blocks;
-            fin_childs++; // every child must send processed data until then.
         }
-
-        waitpid(-1, NULL, WNOHANG); // reap child zombies from process table
     }
-    msgctl(msgid, IPC_RMID, NULL); // clean up msg queue
-    //free(fname1); free(fname2); // clean up buffers used to store filenames
-    
-    if(!p_mismatch){
-        printf("\nSUCCESS...No Mismatch Found! ");
-    }
-    else{
-        printf("\nFAILURE...Mismatch Found! ");
-    }
-    printf("Num of Blocks Processed: %d, using %d no.of processes.\n", t_blocks, num_p);
-    exit(0);
+    fclose(rnew_file);
+    free(threads); free(targs);
+    printf("\nNum of changes applied: %d, using %d no.of threads.\n", total_changes, n_threads);
 }

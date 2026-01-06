@@ -176,7 +176,7 @@ int main(){
     q.front = NULL; q.rear = NULL;
 
     args1.tno = 1; args1.q = &q;
-    args1.no_ops = 20;
+    args1.no_ops = 25;
     pthread_create(&eq1, NULL, enque_worker, &args1); // push 20 elems
 
     args2.tno = 2; args2.q = &q;
@@ -188,7 +188,7 @@ int main(){
     pthread_create(&deq2, NULL, dequeue_worker, &args3); // pop 20 elems
 
     args4.tno = 4; args4.q = &q;
-    args4.no_ops = 10;
+    args4.no_ops = 15;
     pthread_create(&eq2, NULL, enque_worker, &args4); // push 10 elems
     
     //QueueMenu(&q); // uncomment if u want handle extra from main thread

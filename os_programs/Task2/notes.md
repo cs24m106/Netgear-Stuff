@@ -2,3 +2,5 @@
 - `isspace()` function: This standard library function (from `ctype.h`) checks if a character is a whitespace character (space, tab, newline, etc.).
 - `realloc()`: https://stackoverflow.com/questions/63535667/is-it-safe-to-call-realloc-on-the-pointer-you-pass-into-function-itself
 - `strcat`: does not use realloc internally. The function operates on the existing memory block of the destination string, and it is the programmer's responsibility to ensure that this destination buffer is large enough to hold the concatenated result. 
+- memory allocated using `mmap()` is generally initialized with zeros, primarily for security reasons to prevent a process from reading sensitive data left over from a previous process. 
+- `volatile` prevents compiler caching.

@@ -3,7 +3,6 @@
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
-#include <sys/stat.h>
 #include <ctype.h>
 #include <pthread.h>
 

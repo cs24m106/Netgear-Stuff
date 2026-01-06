@@ -1,34 +1,30 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
+#include <stdbool.h>
 #include <unistd.h>
-#include <sys/stat.h>
 #include <ctype.h>
-#include <pthread.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <sched.h>
 
 #define DEF_BLOCK_SIZE 1024
 #define MAX_BLOCK_SIZE block_size*2
 #define DEF_LINE_LENGTH 100
 #define LINE_SPLITTER "-\n"
 
-typedef struct msg_buffer{ // for better accessibility without having to add prefix struct in std declaration
-    const char* fname;
-    const char* word1;
-    const char* word2;
-    size_t base;
-    unsigned int n_changes; // no.of words replaced
-} ThreadsArg; // // use typedef for alias on same struct name itself
-
 /* global control state (all read only) */
-static unsigned int pno; // local process number (parent id:-1)
-static size_t block_size;
-static size_t file_size;
+static int pno; // local process number (parent id:-1, child ids: 0,1,2...)
+static const char* fname;
+static const char* word1;
+static const char* word2;
+static ssize_t block_size;
+static ssize_t file_size;
 static unsigned int line_len;
-static char* shared_content; // ipc r&w with each process max shm[block_size*2]
-static unsigned int *n_changes;
+static volatile char* shared_memory; // ipc r&w with each process max shm[block_size*2]
+static volatile ssize_t* base_addr; // (signed) points to shared-memory first part alone
 
-unsigned int CountOccurences(const char* line, const char* word){
+int CountOccurences(const char* line, const char* word){
     unsigned int n=0, len=strlen(word);
     const char *p = line;
     while ((p = strstr(p, word)) != NULL) {
@@ -149,49 +145,66 @@ char* FormatLineBreaks(char *str, int max_len){
     return fstr;
 }
 
-// child/worker fn handler
-void* replaceFileContent(const char* fname, const char* word1, const char* word2, size_t base)
+int ReplaceFileContent(ssize_t base, char* shared_content)
 {  
-    size_t bytes_read, start;    
+    ssize_t bytes_read, start;    
     
     start = base + pno * block_size;
-    if (start > file_size) return NULL; // break if seek point is beyond eof
+    if (start > file_size) return 0; // break if seek point is beyond eof
 
     FILE *f = fopen(fname,"r");
     fseek(f, start, SEEK_SET);
-    printf("1. Child(TID:%d) initiated with block[start:%010lu,end:%010lu] successfully!\n", 
+    printf("1. Child(PID:%d) initiated with block[start:%010lu,end:%010lu] successfully!\n", 
         pno, start, start+block_size);
     
     // 1. READ FILE INPUT
     char* buf = malloc(sizeof(char) * (block_size+1)); // read onto shared buffer and replace directly on it
     bytes_read = fread(buf, sizeof(char), block_size, f);
     fclose(f); buf[bytes_read] = '\0'; // to handle EOF
-    //printf(">>> (TID:%d) inital addr: %p\n", pno, buf);
+    //printf(">>> (PID:%d) inital addr: %p\n", pno, buf);
 
     // 2. Compress Separators
     CompressSeparators(buf);
-    printf("2. Child(TID:%d): CompressSeparators done!\n", pno);
+    printf("2. Child(PID:%d): CompressSeparators done!\n", pno);
 
     // 3. Replace Word
-    n_changes[pno] = CountOccurences(buf, word1);
-    ReplaceText(&buf, word1, n_changes[pno], word2);
-    printf("3. Child(TID:%d): ReplaceText done!\n", pno);
+    int n_changes = CountOccurences(buf, word1);
+    ReplaceText(&buf, word1, n_changes, word2);
+    printf("3. Child(PID:%d): ReplaceText done!\n", pno);
 
     // 4. Line Breaks
     char* fbuf = FormatLineBreaks(buf, line_len);
     free(buf);
-    printf("4. Child(TID:%d): FormatLineBreaks done!\n", pno);
+    printf("4. Child(PID:%d): FormatLineBreaks done!\n", pno);
     
-    //printf(">>> (TID:%d) final addr: %p\n", pno, buf);
-    shared_content[pno] = fbuf; // save ref onto share buffer
-    printf("5. Child(TID:%d) fully completed with no.of replaced words = %d!\n", 
-        pno, n_changes[pno]);
-    return NULL;
+    //printf(">>> (PID:%d) final addr: %p\n", pno, buf);
+    strcpy(shared_content, fbuf);
+    free(fbuf);
+    printf("5. Child(PID:%d) fully completed with no.of replaced words = %d!\n", pno, n_changes);
+    return n_changes;
 }
 
+// child/worker fn handler
+void EndlessWorker()
+{
+    printf(">> Child(PID:%d) EndlessWorker Started!\n", pno);
+    ssize_t m_base = -1; // not init
+    volatile char *my_shmem = shared_memory + sizeof(ssize_t) + pno * MAX_BLOCK_SIZE;
+    int *n_changes = (int*)my_shmem;
+    while(true)
+    {
+        if (*base_addr > file_size) break; // exit cond
+        while (m_base == *base_addr) sched_yield(); // blocking call
+        m_base = *base_addr;
+        *n_changes = ReplaceFileContent(m_base, (char*)(my_shmem + sizeof(int)));
+    }
+    if (*n_changes < 0) *n_changes = 0; // safety flag to tell parent that child has finished to avoid endless wait
+    printf(">> Child(PID:%d) EndlessWorker Ended!\n", pno);
+    exit(1);
+}
 
-size_t FileLen(const char *file){
-    size_t len = 0;
+ssize_t FileLen(const char *file){
+    ssize_t len = 0;
     FILE *f = fopen(file, "r");
     if(f == NULL)
         printf("Error opening file: %s.\n", file);
@@ -202,22 +215,23 @@ size_t FileLen(const char *file){
     return len;
 }
 
+
 int main(int argc, char **argv) {
     if (argc < 5 || argc > 7) {
         fprintf(stderr, "Usage: %s <file> <word1> <word2> <num_workers> [block_size] [line_len]\n", argv[0]);
         return 1;
     }
 
-    const char *fname = argv[1];
-    const char *word1 = argv[2];
-    const char *word2 = argv[3];
-    int n_threads = atoi(argv[4]);
-    if (n_threads <= 0) n_threads = 1;
+    fname = argv[1];
+    word1 = argv[2];
+    word2 = argv[3];
+    int n_processes = atoi(argv[4]);
+    if (n_processes <= 0) n_processes = 1;
 
     block_size = DEF_BLOCK_SIZE;
     if (argc >= 6) {
         long tmp = atol(argv[5]);
-        if (tmp > 0) block_size = (size_t)tmp;
+        if (tmp > 0) block_size = (ssize_t)tmp;
     }
     line_len = DEF_LINE_LENGTH;
     if (argc == 7) {
@@ -228,55 +242,69 @@ int main(int argc, char **argv) {
     printf("Bytes read in File: %ld\n",file_size);
 
     unsigned int n_blocks = (file_size + block_size - 1)/block_size; // round up / ceil
-    unsigned int n_loop = (n_blocks + n_threads - 1)/n_threads;
-    shared_content = (char**) malloc(sizeof(char*) * n_threads);
-    
-    pthread_t *threads = malloc(n_threads* sizeof(pthread_t));
-    ThreadsArg *targs = malloc(n_threads * sizeof(ThreadsArg));
-
+    //unsigned int n_loop = (n_blocks + n_processes - 1)/n_processes;
+    shared_memory = mmap(NULL, sizeof(ssize_t) + n_processes*MAX_BLOCK_SIZE, 
+                          PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0); // zero-filled by default
+    base_addr = (ssize_t*)shared_memory;
     printf("Given Config: block_size=%lu, num_processes=%d.\n"
-            "No. of blocks:%u, No. of loops:%u.\n\n", block_size, n_threads, n_blocks, n_loop);
+            "No. of blocks:%u\n\n", block_size, n_processes, n_blocks);
     
-    size_t base=0, multiple = n_threads*block_size;
-    char new_fname[20], *block_content;
+    
+    char new_fname[20];
     int fnlen = strlen(fname);
     strncpy(new_fname, fname, fnlen); new_fname[fnlen] = '\0';
     strcat((char*)new_fname,"_rnew.txt");
     FILE *rnew_file = fopen(new_fname, "w");
 
+    setbuf(stdout, NULL); // Disable buffering on stdout. why? to view child's debug printfs before it gets killed
+
+    // reset shared memory so child waits for parent to set args
+    *base_addr = -1;
+    // ResetUpdates(n_processes);
+    volatile char *mem_iter = shared_memory + sizeof(ssize_t);
+    for(int i=0;i<n_processes;i++){ 
+        *(int*)mem_iter = -1; // set n_changes = -1 init to detect change if processing completed
+        mem_iter += MAX_BLOCK_SIZE;
+    }
+
+    for(int i=0;i<n_processes;i++){ 
+        pno = i; // pno of child
+        pid_t pid = fork();
+        if (pid < 0){
+            perror("fork failed");
+            return 1;
+        }
+        if (pid==0)
+            EndlessWorker();
+    }
+    pno = -1; // reset pno for parent
+
+    ssize_t multiple = n_processes*block_size;
+    *base_addr = 0; // start point
     int total_changes = 0; // total no.of replaced texts
-    for(unsigned int k=0; k<n_loop; k++){
-        memset(shared_content, 0, sizeof(char*) * n_threads); // reset to keep track of processed data
+    
+    while(*base_addr<file_size){
+        char *block_content; 
+        mem_iter = shared_memory + sizeof(ssize_t);
 
-        for(int i=0;i<n_threads;i++){            
-            targs[i].fname = fname;
-            targs[i].word1 = word1;
-            targs[i].word2 = word2;
-            targs[i].tno = i;
-            targs[i].base = base;
-            pthread_create(&threads[i], NULL, replaceFileContent, &targs[i]);
-        }
+        for(int i=0;i<n_processes;i++){
+            int *n_changes = (int*)mem_iter;
+            while(*n_changes < 0) sched_yield(); // wait for child one by one to complete, blocking call for parent
+            //printf("--> Worker(PID:%d) done, processing info...\n", i);
+            total_changes += *n_changes;
+            *n_changes = -1; // reset
+            block_content = (char*)(mem_iter + sizeof(int));
+            if(strlen(block_content) > 0)
+                fputs(block_content,rnew_file); // write back processed block content from parent process only
+            mem_iter += MAX_BLOCK_SIZE;
+        }     
         
-        //wait for threads to complete
-        for(int i=0;i<n_threads;i++){
-            pthread_join(threads[i],NULL);
-            total_changes += targs[i].n_changes;
-        }        
-        base += multiple;
-
-        // write-back all processed thread-block content onto new file from main thread only
-        for(int i=0; i<n_threads;i++){
-            if (shared_content[i] != NULL) {
-
-                block_content = shared_content[i];
-                //printf(">>> tid:%d, new addr: %p\n", i, block_content);
-                if(strlen(block_content) > 0)
-                    fputs(block_content,rnew_file);
-                free(block_content);
-            }
-        }
+        *base_addr += multiple; // update point
     }
     fclose(rnew_file);
-    free(threads); free(targs);
-    printf("\nNum of changes applied: %d, using %d no.of threads.\n", total_changes, n_threads);
+    // Wait for all child processes to finish
+    for (int i = 0; i < n_processes; i++) {
+        wait(NULL);
+    }
+    printf("\nNum of changes applied: %d, using %d no.of processes.\n", total_changes, n_processes);
 }

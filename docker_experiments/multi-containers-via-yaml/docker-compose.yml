@@ -1,0 +1,31 @@
+services:
+  server-c:
+    image: gcc:latest
+    container_name: server-c
+    volumes:
+      - ./ServerC:/app/Client
+    working_dir: /app/Client
+    ports:
+      - "9090:9090/udp"
+    stdin_open: true
+    tty: true
+    command: bash -c "gcc udp_server.c -o server && ./server 9090"
+  network_sniffer:
+    image: nicolaka/netshoot
+    container_name: packet_sniffer
+    network_mode: "service:server-c"
+    depends_on:
+      - server-c
+    volumes:
+      - ./UdpReport:/app
+    working_dir: /app
+    command: bash -c "tcpdump port 9090 -w UdpRep.pcap -G 40 -W 1"
+  python_reader:
+    image: python:3.13-slim
+    container_name: python_reader
+    volumes:
+      - ./PythonRep:/app
+    working_dir: /app
+    command: bash -c "sleep 5 && python3 world.py file.txt"
+
+

@@ -2,7 +2,7 @@
 
 - [802.1Q](https://en.wikipedia.org/wiki/IEEE_802.1Q#:~:text=IEEE%20802.1Q%2C%20often%20referred,IEEE%20802.1D%2D2004%20standard.) [VLAN tagging](https://www.cbtnuggets.com/blog/technology/networking/what-is-802-1q-port-tagging) is the IEEE standard for identifying Ethernet frames belonging to different Virtual LANs (VLANs) by inserting a special 4-byte tag into the Ethernet header, allowing switches to forward traffic across trunk links while keeping VLANs logically separate and managing Quality of Service (QoS) with priority bits. This tagging process adds a Tag Protocol Identifier (TPID) and Tag Control Information (TCI) containing the VLAN ID (VID) and priority, enabling a single physical link to carry traffic for multiple VLANs.  
 
-![Frame Format](https://upload.wikimedia.org/wikipedia/commons/thumb/0/0e/Ethernet_802.1Q_Insert.svg/1992px-Ethernet_802.1Q_Insert.svg.png)
+![Frame Format](https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/TCPIP_802.1ad_DoubleTag.svg/1280px-TCPIP_802.1ad_DoubleTag.svg.png)
 
 ### How it Works
 - **Tag Insertion:** When a frame from an access port (connected to an end device) needs to travel across a trunk link (between switches), the switch inserts the 802.1Q tag. 
@@ -31,3 +31,12 @@ When connecting two switches, the link between them is usually a trunk port conf
 - header length (4bits) --> data_offset (8bits) 
 - reserved field (6bits) --> unused (8bits)
 - tcp flags (6bits) --> flags (8bits)
+
+## Double Tagging
+Double tagging, also known as Q-in-Q, is a networking technique that uses two VLAN (Virtual Local Area Network) tags on a single Ethernet frame.
+
+Double tagging involves embedding one VLAN tag (Inner Tag) within another (Outer Tag). The Inner Tag is used to manage traffic within a customer’s network, while the Outer Tag is added by the service provider to route the customer’s data through their infrastructure. This method helps keep traffic from different customers or departments separate while preserving the original VLAN structure.
+
+- **How it works:** A service provider adds an outer tag to customer traffic that already has an inner tag (the customer's VLAN).
+- **Purpose:** Allows a single trunk link to carry traffic for multiple customers, each with their own VLANs, without conflicts, extending VLAN scalability.
+- **Analogy:** Like putting a customer's letter (inner tag) inside a service provider's envelope (outer tag). 

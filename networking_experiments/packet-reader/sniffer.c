@@ -4,6 +4,7 @@
 #include <pcap.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>      // Required for IP address structures
+#include <net/if_arp.h>      // Required for struct arphdr
 #include <netinet/ip.h>       // For L3 IPv4
 #include <netinet/tcp.h>      // For L4 TCP
 #include <netinet/udp.h>      // For L4 UDP
@@ -17,7 +18,7 @@ static uint n = 0;
 void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
     printf("\n=== PACKET FRAME %d ===\n", ++n);
 
-    // 1. Layer 2: Ethernet Header
+    // Layer 2: Ethernet Header
     struct ether_header *eth = (struct ether_header *) packet;
     printf("[L2 Ethernet]\n");
     printf("\t|-Source MAC      : %02X:%02X:%02X:%02X:%02X:%02X\n", 
@@ -53,12 +54,43 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
     }
     printf("\t|-EtherType  : 0x%04X\n",current_eth_type);
 
+    // L3^ ARP & RARP Handling
+    if (current_eth_type == ETHERTYPE_ARP || current_eth_type == ETHERTYPE_REVARP) {
+        struct arphdr *arp = (struct arphdr *)(packet + eth_header_len);
+        
+        printf("[%s Header]\n", (current_eth_type == ETHERTYPE_ARP) ? "ARP" : "RARP");
+        printf("\t|-Hardware Type     : %d (Ethernet=1)\n", ntohs(arp->ar_hrd));
+        printf("\t|-Protocol Type     : 0x%04X (IPv4=0800)\n", ntohs(arp->ar_pro));
+        printf("\t|-Hardware Size     : %d\n", arp->ar_hln);
+        printf("\t|-Protocol Size     : %d\n", arp->ar_pln);
+        
+        uint16_t op = ntohs(arp->ar_op);
+        printf("\t|-Opcode            : %d ", op);
+        if(op == ARPOP_REQUEST) printf("(ARP Request)\n");
+        else if(op == ARPOP_REPLY) printf("(ARP Reply)\n");
+        else if(op == ARPOP_RREQUEST) printf("(RARP Request)\n");
+        else if(op == ARPOP_RREPLY) printf("(RARP Reply)\n");
+        else printf("(Unknown)\n");
+
+        // ARP/RARP addresses follow the fixed header
+        unsigned char *sha = (unsigned char *)(arp + 1);            // Sender Hardware Address
+        unsigned char *spa = sha + arp->ar_hln;                     // Sender Protocol Address
+        unsigned char *tha = spa + arp->ar_pln;                     // Target Hardware Address
+        unsigned char *tpa = tha + arp->ar_hln;                     // Target Protocol Address
+
+        printf("\t|-Sender MAC        : %02X:%02X:%02X:%02X:%02X:%02X\n", sha[0],sha[1],sha[2],sha[3],sha[4],sha[5]);
+        printf("\t|-Sender IP         : %d.%d.%d.%d\n", spa[0], spa[1], spa[2], spa[3]);
+        printf("\t|-Target MAC        : %02X:%02X:%02X:%02X:%02X:%02X\n", tha[0],tha[1],tha[2],tha[3],tha[4],tha[5]);
+        printf("\t|-Target IP         : %d.%d.%d.%d\n", tpa[0], tpa[1], tpa[2], tpa[3]);
+        return; // Finished processing ARP/RARP
+    }
+    
     if (current_eth_type != ETHERTYPE_IP) {
         printf("Unknown EtherType! Valid types = IPv4:%04X, skipping unpacking further...\n", ETHERTYPE_IP);
         return;
     }
-
-    // 2. Layer 3: IPv4 Header (Adjusted offset for possible VLAN tag)
+    
+    // Layer 3: IPv4 Header (Adjusted offset for possible VLAN tag)
     struct ip *ip = (struct ip *)(packet + eth_header_len);
     uint ip_header_len = ip->ip_hl * header_scale;
     uint16_t ip_frag_off_field = ntohs(ip->ip_off); 
@@ -85,7 +117,7 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
     printf("\t|-Source IP         : %s\n", inet_ntoa(ip->ip_src));
     printf("\t|-Destination IP    : %s\n", inet_ntoa(ip->ip_dst));
 
-    // 3. Layer 4: Transport Layer (Switch based on ip->ip_p)
+    // Layer 4: Transport Layer (Switch based on ip->ip_p)
     uint l4_header_len = 0;
     const u_char *l4_start = packet + eth_header_len + ip_header_len;
 
@@ -127,7 +159,7 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
             return;
     }
 
-    // 4. Final Payload
+    // L5&6 Final Payload
     uint total_headers = eth_header_len + ip_header_len + l4_header_len;
     const u_char *payload = packet + total_headers;
     uint payload_len = header->caplen - total_headers;

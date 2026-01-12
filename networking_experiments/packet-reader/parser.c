@@ -4,10 +4,31 @@
 #include <arpa/inet.h>
 #include <net/ethernet.h>
 
+#define ETHERTYPE_QINQ 0x88a8 // not defined in std libs
 #define header_scale 4
 #define fragment_scale 8
 
 static uint n = 0;
+
+// Structs for internal organization
+struct eth_info {
+    uint8_t d_mac[6]; // destination mac addres
+    uint8_t s_mac[6]; // source mac address
+    uint16_t type; // ethertype
+};
+
+struct arp_info {
+    uint16_t hrd, pro, op; // hardwaretype, protocoltype, operation
+    uint8_t hln, pln; // hardwarelength, protocollength
+    uint8_t sha[6], tha[6]; // sourcehardwareaddress, targethardwareaddress
+    uint32_t spa, tpa; // sourceprotocoladdress, targetprotocoladdress
+};
+
+struct ip_info {
+    uint8_t v, hl, tos, ttl, p; // version, headerlength, typeofservice, timetoleave, protocol
+    uint16_t len, id, off, sum; // totallength, identificationno, fragmentoffset, checksum
+    struct in_addr src, dst; // ipv4's source & destination address pair
+};
 
 // Helper to read a specific number of hex bytes from file and return as uint32 
 uint read_hex(FILE *fp, int bytes) {
@@ -23,90 +44,125 @@ uint read_hex(FILE *fp, int bytes) {
     return val;
 }
 
+
 void process_packet(FILE *fp) {
     printf("\n=== PACKET FRAME %d ===\n", ++n);
 
-    // 1. Layer 2: Ethernet Header
+    // Layer 2: Ethernet Header
+    struct eth_info eth;
+    for(int i=0; i<6; i++) eth.d_mac[i] = (uint8_t)read_hex(fp, 1);
+    for(int i=0; i<6; i++) eth.s_mac[i] = (uint8_t)read_hex(fp, 1);
+    eth.type = (uint16_t)read_hex(fp, 2);
+
     printf("[L2 Ethernet]\n");
-    
-    // read MACs byte by byte to format
-    uint d_mac[6], s_mac[6];
-    for(int i=0; i<6; i++) d_mac[i] = read_hex(fp, 1);
-    for(int i=0; i<6; i++) s_mac[i] = read_hex(fp, 1);
-
     printf("\t|-Source MAC      : %02X:%02X:%02X:%02X:%02X:%02X\n", 
-           s_mac[0], s_mac[1], s_mac[2], s_mac[3], s_mac[4], s_mac[5]);
+           eth.s_mac[0], eth.s_mac[1], eth.s_mac[2], eth.s_mac[3], eth.s_mac[4], eth.s_mac[5]);
     printf("\t|-Destination MAC : %02X:%02X:%02X:%02X:%02X:%02X\n", 
-           d_mac[0], d_mac[1], d_mac[2], d_mac[3], d_mac[4], d_mac[5]);
+           eth.d_mac[0], eth.d_mac[1], eth.d_mac[2], eth.d_mac[3], eth.d_mac[4], eth.d_mac[5]);
 
-    uint16_t current_eth_type = (uint16_t)read_hex(fp, 2);
-    printf("\t|-Next EtherType  : 0x%04X\n", current_eth_type);
+    uint16_t current_eth_type = eth.type;
     uint eth_header_len = 14;
+    int vlan_count = 0;
 
-    if (current_eth_type == ETHERTYPE_VLAN) {
+    // Handle VLAN and Q-in-Q (Multiple Tags)
+    while (current_eth_type == ETHERTYPE_VLAN || current_eth_type == ETHERTYPE_QINQ) {
         uint16_t tci = (uint16_t)read_hex(fp, 2);
         uint16_t next_type = (uint16_t)read_hex(fp, 2);
+        vlan_count++;
 
-        printf("\t[802.1Q Header] => ");
-        printf("|-Tag Protocol (TPID): 0x%04X", current_eth_type);
-        printf("|-Priority (PCP): %d", (tci >> 13) & 0x07);
-        printf("|-Drop Eligible (DEI): %d", (tci >> 12) & 0x01);
-        printf("|-VLAN ID (VID): %d\n", (tci & 0x0FFF));
+        printf("\t[VLAN Tag #%d] => ", vlan_count);
+        printf("|Protocol(TPID):0x%04X", current_eth_type);
+        printf("|Priority(PCP):%d", (tci >> 13) & 0x07);
+        printf("|Drop-Eligible(DEI):%d", (tci >> 12) & 0x01);
+        printf("|VID:%d\n", (tci & 0x0FFF));
 
         current_eth_type = next_type;
         eth_header_len += 4;
     }
     printf("\t|-EtherType  : 0x%04X\n", current_eth_type);
 
+    // L3^ ARP & RARP Handling
+    if (current_eth_type == ETHERTYPE_ARP || current_eth_type == ETHERTYPE_REVARP) {
+        struct arp_info arp;
+        arp.hrd = (uint16_t)read_hex(fp, 2);
+        arp.pro = (uint16_t)read_hex(fp, 2);
+        arp.hln = (uint8_t)read_hex(fp, 1);
+        arp.pln = (uint8_t)read_hex(fp, 1);
+        arp.op  = (uint16_t)read_hex(fp, 2);
+
+        printf("[%s Header]\n", (current_eth_type == ETHERTYPE_ARP) ? "ARP" : "RARP");
+        printf("\t|-Hardware Type     : %d (Ethernet=1)\n", arp.hrd);
+        printf("\t|-Protocol Type     : 0x%04X (IPv4=0800)\n", arp.pro);
+        printf("\t|-Hardware Size     : %d\n", arp.hln);
+        printf("\t|-Protocol Size     : %d\n", arp.pln);
+        printf("\t|-Opcode            : %d ", arp.op);
+        
+        if(arp.op == 1) printf("(ARP Request)\n");
+        else if(arp.op == 2) printf("(ARP Reply)\n");
+        else if(arp.op == 3) printf("(RARP Request)\n");
+        else if(arp.op == 4) printf("(RARP Reply)\n");
+
+        for(int i=0; i<6; i++) arp.sha[i] = read_hex(fp, 1);
+        arp.spa = read_hex(fp, 4);
+        for(int i=0; i<6; i++) arp.tha[i] = read_hex(fp, 1);
+        arp.tpa = read_hex(fp, 4);
+
+        struct in_addr sa = {htonl(arp.spa)}, ta = {htonl(arp.tpa)};
+        printf("\t|-Sender MAC        : %02X:%02X:%02X:%02X:%02X:%02X\n", arp.sha[0],arp.sha[1],arp.sha[2],arp.sha[3],arp.sha[4],arp.sha[5]);
+        printf("\t|-Sender IP         : %s\n", inet_ntoa(sa));
+        printf("\t|-Target MAC        : %02X:%02X:%02X:%02X:%02X:%02X\n", arp.tha[0],arp.tha[1],arp.tha[2],arp.tha[3],arp.tha[4],arp.tha[5]);
+        printf("\t|-Target IP         : %s\n", inet_ntoa(ta));
+        return;
+    }
+
     if (current_eth_type != ETHERTYPE_IP) {
         printf("Unknown EtherType! Valid types = IPv4:%04X, skipping unpacking further...\n", ETHERTYPE_IP);
         return;
     }
 
-    // 2. Layer 3: IPv4 Header
-    u_char ver_ihl = (u_char)read_hex(fp, 1);
-    u_char ip_v = (ver_ihl >> 4);
-    u_char ip_hl = (ver_ihl & 0x0F);
-    
-    u_char ip_tos = (u_char)read_hex(fp, 1);
-    uint16_t ip_len = (uint16_t)read_hex(fp, 2);
-    uint16_t ip_id = (uint16_t)read_hex(fp, 2);
-    uint16_t ip_off = (uint16_t)read_hex(fp, 2);
-    u_char ip_ttl = (u_char)read_hex(fp, 1);
-    u_char ip_p = (u_char)read_hex(fp, 1);
-    uint16_t ip_sum = (uint16_t)read_hex(fp, 2);
-    
-    uint32_t s_ip = (uint32_t)read_hex(fp, 4);
-    uint32_t d_ip = (uint32_t)read_hex(fp, 4);
+    // Layer 3: IPv4 Header
+    struct ip_info ip;
+    uint8_t ver_ihl = (uint8_t)read_hex(fp, 1);
+    ip.v = (ver_ihl >> 4);
+    ip.hl = (ver_ihl & 0x0F);
+    ip.tos = (uint8_t)read_hex(fp, 1);
+    ip.len = (uint16_t)read_hex(fp, 2);
+    ip.id  = (uint16_t)read_hex(fp, 2);
+    ip.off = (uint16_t)read_hex(fp, 2);
+    ip.ttl = (uint8_t)read_hex(fp, 1);
+    ip.p   = (uint8_t)read_hex(fp, 1);
+    ip.sum = (uint16_t)read_hex(fp, 2);
+    ip.src.s_addr = htonl(read_hex(fp, 4));
+    ip.dst.s_addr = htonl(read_hex(fp, 4));
 
-    struct in_addr src_addr = { htonl(s_ip) };
-    struct in_addr dst_addr = { htonl(d_ip) };
-
-    uint ip_header_len = ip_hl * header_scale;
-    uint ip_fragment_offset = (ip_off & 0x1FFF) * fragment_scale;
+    uint ip_hdr_bytes = ip.hl * header_scale;
+    uint ip_frag_offset = (ip.off & 0x1FFF) * fragment_scale;
 
     printf("[L3 IPv4]\n");
-    printf("\t|-IP Version        : %d\n", ip_v);
-    printf("\t|-Header Length => Offset:%d * ScalingFactor:%d = %d Bytes\n", ip_hl, header_scale, ip_header_len);
-    printf("\t|-Type Of Service   : %d\n", ip_tos);
-    printf("\t|-Total Length      : %d Bytes\n", ip_len);
-    printf("\t|-Identification    : %d\n", ip_id);
-    printf("\t[Flags] => |-Reserved Bit:%d|-Don't Fragment:%d|-More Fragments:%d|\n", 
-           (ip_off >> 15), (ip_off & 0x4000) >> 14, (ip_off & 0x2000) >> 13);
-    printf("\t|-Fragment Offset  => Offset:%d * ScalingFactor:%d = %d\n", (ip_off & 0x1FFF), fragment_scale, ip_fragment_offset);
-    printf("\t|-TTL               : %d\n", ip_ttl);
-    printf("\t|-Protocol          : %d\n", ip_p);
-    printf("\t|-Header Checksum   : %d\n", ip_sum);
-    printf("\t|-Source IP         : %s\n", inet_ntoa(src_addr));
-    printf("\t|-Destination IP    : %s\n", inet_ntoa(dst_addr));
+    printf("\t|-IP Version        : %d\n", ip.v);
+    printf("\t|-Header Length => Offset:%d * ScalingFactor:%d = %d Bytes\n", ip.hl, header_scale, ip_hdr_bytes);
+    printf("\t|-Type Of Service   : %d\n", ip.tos);
+    printf("\t|-Total Length      : %d Bytes\n", ip.len);
+    printf("\t|-Identification    : %d\n", ip.id);
+     
+    printf("\t[Flags] => |Reserved-Bit:%d |Dont-Fragment:%d|More-Fragments:%d|\n", 
+        (ip.off >> 15), (ip.off & 0x4000) >> 14, (ip.off & 0x2000) >> 13);
 
-    // Skip IP options if any
-    for(int i = 0; i < (int)(ip_header_len - 20); i++) read_hex(fp, 1);
+    printf("\t|-Fragment Offset  => Offset:%d * ScalingFactor:%d = %d\n",
+            (ip.off & 0x1FFF), fragment_scale, ip_frag_offset);
 
-    // 3. Layer 4: Transport Layer
+    printf("\t|-TTL               : %d\n", ip.ttl);
+    printf("\t|-Protocol          : %d\n", ip.p);
+    printf("\t|-Header Checksum   : %d\n", ip.sum);
+    printf("\t|-Source IP         : %s\n", inet_ntoa(ip.src));
+    printf("\t|-Destination IP    : %s\n", inet_ntoa(ip.dst));
+
+    for(int i = 0; i < (int)(ip_hdr_bytes - 20); i++) read_hex(fp, 1); // Skip IP options
+
+    // Layer 4: Transport Layer
     uint l4_header_len = 0;
 
-    if (ip_p == IPPROTO_TCP) {
+    if (ip.p == IPPROTO_TCP) {
         uint16_t src_port = (uint16_t)read_hex(fp, 2);
         uint16_t dst_port = (uint16_t)read_hex(fp, 2);
         uint32_t seq = (uint32_t)read_hex(fp, 4);
@@ -125,7 +181,7 @@ void process_packet(FILE *fp) {
         printf("\t|-Sequence No.      : %u\n", seq);
         printf("\t|-Acknowledge No.   : %u\n", ack);
         printf("\t|-Header Length => Offset:%d * ScalingFactor:%d = %d Bytes\n", th_off, header_scale, l4_header_len);
-        printf("\t|-Flags => |-URG:%d|-ACK:%d|-PSH:%d|-RST:%d|-SYN:%d|-FIN:%d|\n", 
+        printf("\t|-Flags => |URG:%d|ACK:%d|PSH:%d|RST:%d|SYN:%d|FIN:%d|\n",
                (th_flags & 0x20)>>5, (th_flags & 0x10)>>4, (th_flags & 0x08)>>3,
                (th_flags & 0x04)>>2, (th_flags & 0x02)>>1, (th_flags & 0x01));
         printf("\t|-Window Size       : %d\n", win);
@@ -134,7 +190,7 @@ void process_packet(FILE *fp) {
 
         for(int i = 0; i < (int)(l4_header_len - 20); i++) read_hex(fp, 1);
     } 
-    else if (ip_p == IPPROTO_UDP) {
+    else if (ip.p == IPPROTO_UDP) {
         uint16_t src_port = (uint16_t)read_hex(fp, 2);
         uint16_t dst_port = (uint16_t)read_hex(fp, 2);
         uint16_t len = (uint16_t)read_hex(fp, 2);
@@ -148,7 +204,7 @@ void process_packet(FILE *fp) {
     }
 
     // 4. Final Payload
-    int payload_len = ip_len - ip_header_len - l4_header_len;
+    int payload_len = ip.len - ip_hdr_bytes - l4_header_len;
     if (payload_len > 0) {
         printf("[Payload (%d bytes)]\n  \"", payload_len);
         for(int i = 0; i < payload_len; i++) {

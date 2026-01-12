@@ -2,7 +2,59 @@
 # Ref: https://www.wireshark.org/docs/man-pages/text2pcap.html#:~:text=Offsets%20are%20followed%20by%20one,support%20little%2Dendian%20byte%20order.
 # Note: Any line where the first non-whitespace character is # will be ignored. 
 
+# --- PACKET 1: ARP REQUEST ---
+# Host A (00:11:22:33:44:55) asks: "Who has 192.168.1.101?"
+000000 ff ff ff ff ff ff 00 11 22 33 44 55 08 06 00 01
+# L2: Dst=Broadcast, Src=00:11:22:33:44:55, Type=0x0806 (ARP)
+# ARP Header: HW=Ethernet(1), Proto=IPv4(0800)
 
+000010 08 00 06 04 00 01 00 11 22 33 44 55 c0 a8 01 64
+# HW Len=6, Proto Len=4, Opcode=1 (Request)
+# Sender MAC: 00:11:22:33:44:55, Sender IP: 192.168.1.100 (c0 a8 01 64)
+
+000020 00 00 00 00 00 00 c0 a8 01 65
+# Target MAC: 00:00:00:00:00:00 (Unknown), Target IP: 192.168.1.101 (c0 a8 01 65)
+
+
+# --- PACKET 2: ARP REPLY ---
+# Host B (98:76:54:32:10:01) responds: "I am 192.168.1.101"
+000000 00 11 22 33 44 55 98 76 54 32 10 01 08 06 00 01
+# L2: Dst=00:11:22:33:44:55, Src=98:76:54:32:10:01, Type=0x0806 (ARP)
+
+000010 08 00 06 04 00 02 98 76 54 32 10 01 c0 a8 01 65
+# Opcode=2 (Reply)
+# Sender MAC: 98:76:54:32:10:01, Sender IP: 192.168.1.101
+
+000020 00 11 22 33 44 55 c0 a8 01 64
+# Target MAC: 00:11:22:33:44:55, Target IP: 192.168.1.100
+
+
+# --- PACKET 3: RARP REQUEST ---
+# Host C (66:44:66:44:66:44) asks: "What is my IP address?"
+000000 ff ff ff ff ff ff 66 44 66 44 66 44 80 35 00 01
+# L2: Dst=Broadcast, Src=66:44:66:44:66:44, Type=0x8035 (RARP)
+
+000010 08 00 06 04 00 03 66 44 66 44 66 44 00 00 00 00
+# Opcode=3 (RARP Request)
+# Sender MAC: 66:44:66:44:66:44, Sender IP: 0.0.0.0 (Unknown)
+
+000020 66 44 66 44 66 44 00 00 00 00
+# Target MAC: 66:44:66:44:66:44, Target IP: 0.0.0.0
+
+
+# --- PACKET 4: RARP REPLY ---
+# RARP Server responds: "Your IP is 1.1.1.1"
+000000 66 44 66 44 66 44 aa bb cc dd ee ff 80 35 00 01
+# L2: Dst=66:44:66:44:66:44, Src=aa:bb:cc:dd:ee:ff (Server), Type=0x8035
+
+000010 08 00 06 04 00 04 aa bb cc dd ee ff 01 01 01 fe
+# Opcode=4 (RARP Reply)
+# Sender MAC: aa:bb:cc:dd:ee:ff, Sender IP: 1.1.1.254 (Server IP)
+
+000020 66 44 66 44 66 44 01 01 01 01
+# Target MAC: 66:44:66:44:66:44, Target IP: 1.1.1.1 (Assigned IP)
+
+# ----------------------------------------------------
 000000 ff ff ff ff ff ff 00 11 22 33 44 55 08 00 45 00 
 # offset 0x00: dst MAC, src MAC, EtherType, start of IPv4
 # dst MAC: ff:ff:ff:ff:ff:ff (broadcast)
@@ -36,7 +88,7 @@
 000030 71 10 00 00 00 00 48 65 6c 6c 6f
 # offset 0x30: TCP end, Payload ASCII: 'H' 'e' 'l' 'l' 'o'
 
-
+# ----------------------------------------------------
 # L2: Ethernet + VLAN (802.1Q)
 000000 00 11 22 33 44 55 98 76 54 32 10 01 81 00 20 64
 # Dst MAC: 00:11:22:33:44:55, Src MAC: 98:76:54:32:10:01
@@ -67,6 +119,7 @@
 # 57 6f 72 6c 64 21 -> Payload: "World!"
 
 
+# ----------------------------------------------------
 000000 01 00 5e 00 00 01 66 44 66 44 66 44 81 00 00 01 
 # Offset 0x00: Dst MAC (01:00:5e... Multicast), Src MAC (66:44...), EtherType 0x8100 (VLAN), TCI (VID 1)
 
@@ -83,11 +136,11 @@
 000070 4d 50 ff 4a e9 9f 15 35 78 fe 32 2c 92 d0 d0 9c 
 # Offset 0x30-0x70: Zeroed payload followed by ASCII/Data footer
 
-
+# ----------------------------------------------------
 000000 00 0c 29 4b 5d 6e 00 50 56 c0 00 08 88 a8 a0 64 
 # Offset 0x00: Dst MAC, Src MAC, Outer EtherType 0x88a8 (802.1ad Q-in-Q), Outer TCI (VID 100, PCP 5)
 
-000010 81 00 20 c8 08 00 45 00 00 54 1c 46 40 00 40 11 
+000010 81 00 20 c8 08 00 45 00 00 6a 1c 46 40 00 40 11 
 # Offset 0x10: Inner EtherType 0x8100 (802.1Q), Inner TCI (VID 200, PCP 1), IPv4 EtherType 0x0800, IP Header, ID, Flags (DF), TTL (64), Proto (UDP)
 
 000020 b0 c2 c0 a8 01 0a 08 08 08 08 04 d2 16 2e 00 40 

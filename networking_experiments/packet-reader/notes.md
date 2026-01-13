@@ -118,3 +118,70 @@ If they are not the same, the packet is technically valid according to the proto
 |Server Lookup Key|Target Hardware Address|Target Hardware Address|
 |Where is Reply sent?|To the Sender (the host itself).|To the Sender (the proxy/requesting host).|
 |Primary Goal|Self-Configuration.|Proxying or Information Gathering.|
+
+## [ICMP](https://www.geeksforgeeks.org/computer-networks/internet-control-message-protocol-icmp/) Format:
+![Frame Format](https://media.geeksforgeeks.org/wp-content/uploads/20250929112928196769/frame_3120.webp)
+
+Ref: [Control Msgs](https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol#Control_messages) handled by ICMP.
+
+### **Protocol Stack**
+NOTE: The ICMP message is encapsulated in IP packet.
+```
++0-------------------------------------31
+|             ICMP message             |
++--------------------------------------+
+| IP header [Protocol=1] (8 bits=0x01) |
++--------------------------------------+
+|               L2 header              |
++--------------------------------------+
+```
+
+### [Generic Header](https://en.wikipedia.org/wiki/Internet_Control_Message_Protocol#Header):
+- Type (8-bit): brief description of the message about what kind of message, common examples:
+    >- Type 0 - Echo reply
+    >- Type 3 - Destination unreachable
+    >- Type 5 - Redirect Message
+    >- Type 8 - Echo Request
+    >- Type 11 - Time Exceeded
+    >- Type 12 - Parameter problem
+
+- **Code (8-bit)**: additional information about the error message and type.
+- **Checksum (16-bit)**: to ensure that complete data is delivered.
+- **Extended Header (32-bit)**: pointing out the problem in IP Message
+
+- Ref: some actual formats of ICMP:
+    - [ICMP Echo Request/Reply Msg:](https://support.huawei.com/enterprise/en/doc/EDOC1100174721/9dff3e87/icmp-echo-request-reply-message)
+        - The Ping and Tracert for IP network are implemented by sending ICMP Echo messages. 
+        - `Type = 0:reply, 8:request`; `Code = 0`;
+        - Extended Header (4-Byte) ==> | Identifier (2-Byte) | Sequence Number (2-Byte) |
+
+    - [Destination Unreachable Msg:](https://support.huawei.com/enterprise/en/doc/EDOC1100174721/ae7f300b/icmp-destination-unreachable-message)
+        - note: does not optionally discard packets, created when cannot be forwarded
+        - `Type = 3`; `Code = 0-15` different reasons;
+        - Extended Header (4-Byte) ==> | Unused (4-Byte) --> must be 0s |
+    - [Source Redirect Msg:](https://support.huawei.com/enterprise/en/doc/EDOC1100174721/191b5fc1/icmp-redirect-message-format)
+        - sent to host/gateway that forwards datagram to a less optimal (not shorter) path as warning
+        - note: doesnt discard the actual packet, it forwards to destination gateway but also generates ICMP
+        - `Type = 5`; `Code = 0-4`;
+        - Extended Header (4-Byte) ==> | Gateway Internet Address (4-Byte) | <br>
+        which handles Destination network's traffic
+    - [Time Exceeded Msg](https://support.huawei.com/enterprise/en/doc/EDOC1100174721/ab8e938e/icmp-time-exceeded-message)
+        - time to live field is zero it must discard the datagram and notify source host
+        - `Type = 11`; `Code = 0: TTL exceeded, 1: fragment reassemby time exceeded`;
+        - Extended Header (4-Byte) ==> | Unused |
+    - [Parameter Problem Msg](https://support.huawei.com/enterprise/en/doc/EDOC1100174721/6a928db7/icmp-parameter-problem-message)
+        - problem with the header parameters. One potential source of such a problem is with incorrect arguments in an option.
+        - `Type = 12`; `Code = 0`(not used, ptr indicates error)
+        - Extended Header (4-Byte) ==> | Pointer (1-Byte) | Unused (3-Byte) | <br>
+        Pointer identifies the octet where an error was detected.
+    - [Source Quench Msg](https://support.huawei.com/enterprise/en/doc/EDOC1100174721/cf808535/icmp-source-quench-message)
+        - A gateway may discard internet datagrams if it does not have the buffer space needed to queue the datagrams.
+        - A destination host may also send a source quench message if datagrams arrive too fast to be processed.
+        - The source quench message is a request to the host to cut back the rate at which it is sending traffic to the internet destination.
+        - `Type = 4`; `Code = 0`; (using type alone is sufficient to notify)
+        - Extended Header (4-Byte) ==> | Unused |
+
+### Data
+ICMP error messages contain a data section that includes a **copy of the entire IPv4 header, plus at least the first eight bytes of data** from the IPv4 packet that caused the error message. The length of ICMP error messages should **not exceed 576 bytes** for ipv4 (1280 bytes for ipv6). <br>
+*Note: Most Generic Case: Internet Header + 64 bits of Original Data Datagram*
+

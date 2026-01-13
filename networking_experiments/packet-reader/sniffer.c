@@ -4,11 +4,13 @@
 #include <pcap.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>      // Required for IP address structures
+#include <net/ethernet.h>    // DEFINES: struct ether_header, ETHERTYPE_IP
 #include <net/if_arp.h>      // Required for struct arphdr
 #include <netinet/ip.h>       // For L3 IPv4
 #include <netinet/tcp.h>      // For L4 TCP
 #include <netinet/udp.h>      // For L4 UDP
-#include <net/ethernet.h>    // DEFINES: struct ether_header, ETHERTYPE_IP
+#include <netinet/ip_icmp.h>  // For ICMP structs
+#include <netinet/igmp.h>     // For IGMP structs
 
 #define ETHERTYPE_QINQ 0x88a8 // not defined in std libs
 #define header_scale 4 // header length field scale for ip and tcp
@@ -117,7 +119,7 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
     printf("\t|-Source IP         : %s\n", inet_ntoa(ip->ip_src));
     printf("\t|-Destination IP    : %s\n", inet_ntoa(ip->ip_dst));
 
-    // Layer 4: Transport Layer (Switch based on ip->ip_p)
+    // Layer 4: Transport Layer || Control Layer (Switch based on ip->ip_p)
     uint l4_header_len = 0;
     const u_char *l4_start = packet + eth_header_len + ip_header_len;
 
@@ -143,16 +145,98 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
             printf("\t|-Urgent Pointer    : %d\n", tcp->urg_ptr);
             break;
         }
+
+        case IPPROTO_ICMP: {
+            struct icmphdr *icmp = (struct icmphdr *)l4_start;
+            l4_header_len = 8; // ICMP header is 8 bytes
+            printf("[L4 ICMP]\n");
+            
+            // 1. Basic ICMP Fields
+            printf("\t|-Type     : %d ", icmp->type);
+            
+            // Decoding the Type
+            switch(icmp->type) {
+                case ICMP_ECHOREPLY:     printf("(Echo Reply)\n"); break;
+                case ICMP_DEST_UNREACH:  printf("(Destination Unreachable)\n"); break;
+                case ICMP_REDIRECT:      printf("(Redirect / Routing Error)\n"); break;
+                case ICMP_ECHO:          printf("(Echo Request)\n"); break;
+                case ICMP_TIME_EXCEEDED: printf("(Time Exceeded / TTL Expired)\n"); break;
+                default:                 printf("(Other / Feedback)\n"); break;
+            }
+
+            printf("\t|-Code     : %d\n", (uint)icmp->code);
+            printf("\t|-Checksum : %d\n", ntohs(icmp->checksum));
+
+            // 2. Specialized Format Handling
+            // Echo Request/Reply (Ping)
+            if (icmp->type == ICMP_ECHO || icmp->type == ICMP_ECHOREPLY) {
+                printf("\t|-Identifier : %d\n", ntohs(icmp->un.echo.id));
+                printf("\t|-Sequence   : %d\n", ntohs(icmp->un.echo.sequence));
+            } 
+            // Gateway Redirect
+            else if (icmp->type == ICMP_REDIRECT) {
+                struct in_addr gw;
+                gw.s_addr = icmp->un.gateway;
+                printf("\t|-Gateway Addr: %s\n", inet_ntoa(gw));
+            }
+            // Error handling (Destination Unreachable / Time Exceeded)
+            else if (icmp->type == ICMP_DEST_UNREACH || icmp->type == ICMP_TIME_EXCEEDED) {
+                printf("\t|-Next-Hop MTU: %d (if applicable)\n", ntohs(icmp->un.frag.mtu));
+                printf("\t[Note] This packet contains a copy of the original failed IP header.\n");
+            }
+            break;
+        }
+
+        case IPPROTO_IGMP: {
+            struct igmp *igmp = (struct igmp *)l4_start;
+            l4_header_len = 8;
+            printf("[L4 IGMP]\n");
+            
+            printf("\t|-Type              : 0x%02X ", igmp->igmp_type);
+            switch(igmp->igmp_type) {
+                case IGMP_MEMBERSHIP_QUERY:     printf("(Membership Query)\n"); break;
+                case IGMP_V1_MEMBERSHIP_REPORT: printf("(v1 Membership Report)\n"); break;
+                case IGMP_V2_MEMBERSHIP_REPORT: printf("(v2 Membership Report)\n"); break;
+                case IGMP_V2_LEAVE_GROUP:       printf("(Leave Group)\n"); break;
+                case 0x22:                      printf("(v3 Membership Report)\n"); break;
+                default:                        printf("(Unknown IGMP Type)\n"); break;
+            }
+
+            printf("\t|-Max Response Time : %d\n", igmp->igmp_code);
+            printf("\t|-Checksum          : %d\n", ntohs(igmp->igmp_cksum));
+            printf("\t|-Group Address     : %s\n", inet_ntoa(igmp->igmp_group));
+            break;
+        }
+
         case IPPROTO_UDP: {
             struct udphdr *udp = (struct udphdr *)l4_start;
             l4_header_len = 8; // UDP is always 8 bytes
+            uint16_t src_port = ntohs(udp->source);
+            uint16_t dst_port = ntohs(udp->dest);
             printf("[L4 UDP]\n");
-            printf("  |-Source Port       : %u\n", ntohs(udp->source));
-            printf("  |-Destination Port  : %u\n", ntohs(udp->dest));
+            printf("\t|-Source Port       : %u\n", src_port);
+            printf("\t|-Destination Port  : %u\n", dst_port);
             printf("  |-UDP Length        : %u\n", ntohs(udp->len));
             printf("  |-Checksum          : %d\n", ntohs(udp->check));
+            
+            // --- DNS Handling ---
+            if (src_port == 53 || dst_port == 53) {
+                const u_char *dns_start = l4_start + l4_header_len;
+                printf("[L7 DNS Header]\n");
+                printf("\t|-Transaction ID    : 0x%04X\n", ntohs(*(uint16_t*)(dns_start)));
+                
+                uint16_t flags = ntohs(*(uint16_t*)(dns_start + 2));
+                printf("\t|-Flags             : 0x%04X ", flags);
+                printf("(%s)\n", (flags & 0x8000) ? "Response" : "Query");
+
+                printf("\t|-Questions         : %u\n", ntohs(*(uint16_t*)(dns_start + 4)));
+                printf("\t|-Answer RRs        : %u\n", ntohs(*(uint16_t*)(dns_start + 6)));
+                printf("\t|-Authority RRs     : %u\n", ntohs(*(uint16_t*)(dns_start + 8)));
+                printf("\t|-Additional RRs    : %u\n", ntohs(*(uint16_t*)(dns_start + 10)));
+            }
             break;
         }
+
         default:
             printf("Protocol Not Supported! Valid types = TCP:%d, UDP:%d, skipping unpacking further...\n", 
                 IPPROTO_TCP, IPPROTO_UDP);

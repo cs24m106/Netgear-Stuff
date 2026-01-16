@@ -1,4 +1,5 @@
 // gcc sniffer.c -lpcap
+// to read pcap files
 #define _DEFAULT_SOURCE  // Enables BSD-style struct definitions on Linux
 #include <stdio.h>
 #include <pcap.h>
@@ -107,7 +108,7 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
     printf("\t|-Total Length      : %d Bytes\n", ntohs(ip->ip_len));
     printf("\t|-Identification    : %d\n", ntohs(ip->ip_id));
 
-    printf("\t[Flags] => |Reserved-Bit:%d |Dont-Fragment:%d|More-Fragments:%d|\n", 
+    printf("\t[Flags] => |Reserved-Bit:%d|Dont-Fragment:%d|More-Fragments:%d|\n", 
         (ip_frag_off_field& IP_RF) >> 15, (ip_frag_off_field & IP_DF) >> 14, (ip_frag_off_field & IP_MF) >> 13);
 
     printf("\t|-Fragment Offset  => Offset:%d * ScalingFactor:%d = %d\n",
@@ -216,8 +217,8 @@ void process_packet(u_char *args, const struct pcap_pkthdr *header, const u_char
             printf("[L4 UDP]\n");
             printf("\t|-Source Port       : %u\n", src_port);
             printf("\t|-Destination Port  : %u\n", dst_port);
-            printf("  |-UDP Length        : %u\n", ntohs(udp->len));
-            printf("  |-Checksum          : %d\n", ntohs(udp->check));
+            printf("\t|-UDP Length        : %u\n", ntohs(udp->len));
+            printf("\t|-Checksum          : %d\n", ntohs(udp->check));
             
             // --- DNS Handling ---
             if (src_port == 53 || dst_port == 53) {

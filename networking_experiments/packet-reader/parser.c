@@ -1,3 +1,4 @@
+// To read hex dump files without offset formatting
 #define _DEFAULT_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,7 +49,7 @@ uint read_hex(FILE *fp, int bytes) {
 void process_packet(FILE *fp) {
     printf("\n=== PACKET FRAME %d ===\n", ++n);
 
-    // Layer 2: Ethernet Header
+    // --- Layer 2: Ethernet Header ---
     struct eth_info eth;
     for(int i=0; i<6; i++) eth.d_mac[i] = (uint8_t)read_hex(fp, 1);
     for(int i=0; i<6; i++) eth.s_mac[i] = (uint8_t)read_hex(fp, 1);
@@ -61,10 +62,9 @@ void process_packet(FILE *fp) {
            eth.d_mac[0], eth.d_mac[1], eth.d_mac[2], eth.d_mac[3], eth.d_mac[4], eth.d_mac[5]);
 
     uint16_t current_eth_type = eth.type;
-    uint eth_header_len = 14;
+    uint eth_header_len = 14; // SA(6)+DA(6)+Len(2) --> note CRC(4) is trailer after data payload, thus not included
     int vlan_count = 0;
 
-    // Handle VLAN and Q-in-Q (Multiple Tags)
     while (current_eth_type == ETHERTYPE_VLAN || current_eth_type == ETHERTYPE_QINQ) {
         uint16_t tci = (uint16_t)read_hex(fp, 2);
         uint16_t next_type = (uint16_t)read_hex(fp, 2);
@@ -81,7 +81,7 @@ void process_packet(FILE *fp) {
     }
     printf("\t|-EtherType  : 0x%04X\n", current_eth_type);
 
-    // L3^ ARP & RARP Handling
+    // --- L3 ARP & RARP Handling ---
     if (current_eth_type == ETHERTYPE_ARP || current_eth_type == ETHERTYPE_REVARP) {
         struct arp_info arp;
         arp.hrd = (uint16_t)read_hex(fp, 2);
@@ -120,7 +120,7 @@ void process_packet(FILE *fp) {
         return;
     }
 
-    // Layer 3: IPv4 Header
+    // --- Layer 3: IPv4 Header ---
     struct ip_info ip;
     uint8_t ver_ihl = (uint8_t)read_hex(fp, 1);
     ip.v = (ver_ihl >> 4);
@@ -144,35 +144,30 @@ void process_packet(FILE *fp) {
     printf("\t|-Type Of Service   : %d\n", ip.tos);
     printf("\t|-Total Length      : %d Bytes\n", ip.len);
     printf("\t|-Identification    : %d\n", ip.id);
-     
     printf("\t[Flags] => |Reserved-Bit:%d |Dont-Fragment:%d|More-Fragments:%d|\n", 
         (ip.off >> 15), (ip.off & 0x4000) >> 14, (ip.off & 0x2000) >> 13);
-
-    printf("\t|-Fragment Offset  => Offset:%d * ScalingFactor:%d = %d\n",
-            (ip.off & 0x1FFF), fragment_scale, ip_frag_offset);
-
+    printf("\t|-Fragment Offset  => Offset:%d * ScalingFactor:%d = %d\n", (ip.off & 0x1FFF), fragment_scale, ip_frag_offset);
     printf("\t|-TTL               : %d\n", ip.ttl);
     printf("\t|-Protocol          : %d\n", ip.p);
     printf("\t|-Header Checksum   : %d\n", ip.sum);
     printf("\t|-Source IP         : %s\n", inet_ntoa(ip.src));
     printf("\t|-Destination IP    : %s\n", inet_ntoa(ip.dst));
 
-    for(int i = 0; i < (int)(ip_hdr_bytes - 20); i++) read_hex(fp, 1); // Skip IP options
+    for(int i = 0; i < (int)(ip_hdr_bytes - 20); i++) read_hex(fp, 1); 
 
-    // Layer 4: Transport Layer
+    // --- Layer 4: Transport/Control Layer ---
     uint l4_header_len = 0;
+    uint app_header_len = 0;
 
     if (ip.p == IPPROTO_TCP) {
-        uint16_t src_port = (uint16_t)read_hex(fp, 2);
-        uint16_t dst_port = (uint16_t)read_hex(fp, 2);
-        uint32_t seq = (uint32_t)read_hex(fp, 4);
-        uint32_t ack = (uint32_t)read_hex(fp, 4);
-        uint16_t off_flags = (uint16_t)read_hex(fp, 2);
+        uint16_t src_port = read_hex(fp, 2);
+        uint16_t dst_port = read_hex(fp, 2);
+        uint32_t seq = read_hex(fp, 4);
+        uint32_t ack = read_hex(fp, 4);
+        uint16_t off_flags = read_hex(fp, 2);
         uint8_t th_off = (off_flags >> 12);
         uint8_t th_flags = (off_flags & 0xFF);
-        uint16_t win = (uint16_t)read_hex(fp, 2);
-        uint16_t sum = (uint16_t)read_hex(fp, 2);
-        uint16_t urp = (uint16_t)read_hex(fp, 2);
+        uint16_t win = read_hex(fp, 2), sum = read_hex(fp, 2), urp = read_hex(fp, 2);
 
         l4_header_len = th_off * header_scale;
         printf("[L4 TCP]\n");
@@ -181,38 +176,83 @@ void process_packet(FILE *fp) {
         printf("\t|-Sequence No.      : %u\n", seq);
         printf("\t|-Acknowledge No.   : %u\n", ack);
         printf("\t|-Header Length => Offset:%d * ScalingFactor:%d = %d Bytes\n", th_off, header_scale, l4_header_len);
-        printf("\t|-Flags => |URG:%d|ACK:%d|PSH:%d|RST:%d|SYN:%d|FIN:%d|\n",
-               (th_flags & 0x20)>>5, (th_flags & 0x10)>>4, (th_flags & 0x08)>>3,
-               (th_flags & 0x04)>>2, (th_flags & 0x02)>>1, (th_flags & 0x01));
+        printf("\t|-Flags => |URG:%d|ACK:%d|PSH:%d|RST:%d|SYN:%d|FIN:%d|\n", 
+               (th_flags&0x20)>>5, (th_flags&0x10)>>4, (th_flags&0x08)>>3, (th_flags&0x04)>>2, (th_flags&0x02)>>1, (th_flags&0x01));
         printf("\t|-Window Size       : %d\n", win);
         printf("\t|-Checksum          : %d\n", sum);
         printf("\t|-Urgent Pointer    : %d\n", urp);
-
         for(int i = 0; i < (int)(l4_header_len - 20); i++) read_hex(fp, 1);
     } 
     else if (ip.p == IPPROTO_UDP) {
-        uint16_t src_port = (uint16_t)read_hex(fp, 2);
-        uint16_t dst_port = (uint16_t)read_hex(fp, 2);
-        uint16_t len = (uint16_t)read_hex(fp, 2);
-        uint16_t sum = (uint16_t)read_hex(fp, 2);
+        uint16_t src_port = read_hex(fp, 2);
+        uint16_t dst_port = read_hex(fp, 2);
+        uint16_t len = read_hex(fp, 2);
+        uint16_t sum = read_hex(fp, 2);
         l4_header_len = 8;
         printf("[L4 UDP]\n");
         printf("\t|-Source Port       : %u\n", src_port);
         printf("\t|-Destination Port  : %u\n", dst_port);
         printf("\t|-UDP Length        : %u\n", len);
         printf("\t|-Checksum          : %d\n", sum);
+
+        // DNS Handling (Application Layer inside UDP)
+        if (src_port == 53 || dst_port == 53) {
+            printf("[L7 DNS Header]\n");
+            printf("\t|-Transaction ID    : 0x%04X\n", (uint16_t)read_hex(fp, 2));
+            uint16_t dns_flags = (uint16_t)read_hex(fp, 2);
+            printf("\t|-Flags             : 0x%04X (%s)\n", dns_flags, (dns_flags & 0x8000) ? "Response" : "Query");
+            printf("\t|-Questions         : %u\n", (uint16_t)read_hex(fp, 2));
+            printf("\t|-Answer RRs        : %u\n", (uint16_t)read_hex(fp, 2));
+            printf("\t|-Authority RRs     : %u\n", (uint16_t)read_hex(fp, 2));
+            printf("\t|-Additional RRs    : %u\n", (uint16_t)read_hex(fp, 2));
+            app_header_len = 12; // DNS header is 12 bytes
+        }
+    }
+    else if (ip.p == 1) { // ICMP
+        uint8_t type = read_hex(fp, 1);
+        uint8_t code = read_hex(fp, 1);
+        uint16_t cksum = read_hex(fp, 2);
+        uint32_t rest = read_hex(fp, 4);
+        l4_header_len = 8;
+        printf("[L4 ICMP]\n");
+        printf("\t|-Type              : %d ", type);
+        if(type==8) printf("(Echo Request)\n"); else if(type==0) printf("(Echo Reply)\n");
+        else if(type==3) printf("(Dest Unreachable)\n"); else if(type==11) printf("(Time Exceeded)\n");
+        else printf("(Other)\n");
+        printf("\t|-Code              : %d\n", code);
+        printf("\t|-Checksum          : %d\n", cksum);
+        if(type==0 || type==8) {
+            printf("\t|-Identifier        : %d\n", rest >> 16);
+            printf("\t|-Sequence Number   : %d\n", rest & 0xFFFF);
+        }
+    }
+    else if (ip.p == 2) { // IGMP
+        uint8_t type = read_hex(fp, 1);
+        uint8_t mrtc = read_hex(fp, 1);
+        uint16_t cksum = read_hex(fp, 2);
+        uint32_t group = read_hex(fp, 4);
+        struct in_addr gaddr = {htonl(group)};
+        l4_header_len = 8;
+        printf("[L4 IGMP]\n");
+        printf("\t|-Type              : 0x%02X ", type);
+        if(type==0x11) printf("(Membership Query)\n"); else if(type==0x16) printf("(v2 Report)\n");
+        else if(type==0x17) printf("(Leave Group)\n"); else if(type==0x22) printf("(v3 Report)\n");
+        printf("\t|-Max Response Time : %d\n", mrtc);
+        printf("\t|-Checksum          : %d\n", cksum);
+        printf("\t|-Group Address     : %s\n", inet_ntoa(gaddr));
     }
 
-    // 4. Final Payload
-    int payload_len = ip.len - ip_hdr_bytes - l4_header_len;
+    // --- 4. Final Payload ---
+    int payload_len = ip.len - ip_hdr_bytes - l4_header_len - app_header_len;
     if (payload_len > 0) {
         printf("[Payload (%d bytes)]\n  \"", payload_len);
         for(int i = 0; i < payload_len; i++) {
             u_char c = (u_char)read_hex(fp, 1);
-            if(c >= 32 && c <= 126) printf("%c", c);
-            else printf(".");
+            printf("%c", (c >= 32 && c <= 126) ? c : '.');
         }
         printf("\"\n");
+    } else {
+        printf("[No Extra Payload Found]\n");
     }
 }
 

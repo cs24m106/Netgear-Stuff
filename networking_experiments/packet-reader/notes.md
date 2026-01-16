@@ -185,3 +185,57 @@ NOTE: The ICMP message is encapsulated in IP packet.
 ICMP error messages contain a data section that includes a **copy of the entire IPv4 header, plus at least the first eight bytes of data** from the IPv4 packet that caused the error message. The length of ICMP error messages should **not exceed 576 bytes** for ipv4 (1280 bytes for ipv6). <br>
 *Note: Most Generic Case: Internet Header + 64 bits of Original Data Datagram*
 
+
+## [IGMP](https://en.wikipedia.org/wiki/Internet_Group_Management_Protocol) Format
+![v1 Structure](https://media.geeksforgeeks.org/wp-content/uploads/20250929112807086818/frame_3121.webp)
+- Version (4 bit) : 0x1 for IGMPv1. Version 0 is specified in RFC-988 and is now obsolete.
+- Type (4 bit) : There are two types of IGMP message of concern to hosts:
+    - 1 = Host Membership Query
+    - 2 = Host Membership Report
+
+![v2 Structure](https://media.geeksforgeeks.org/wp-content/uploads/20250929112738564361/frame_3122.webp)
+- In IGMPv2, the new 8-bit type field is a combination of the old 4-bit version field and the old 4-bit type field such that new type codes are compactable with IGMPv1. (notice first octect of type codes below preserve version code 0x1 for IGMPv1)
+- Type (8 bit) : IGMPv2 messages include the following types:
+    - 0x11: Membership Query messages
+    - 0x12: IGMPv1 Membership Report messages
+    - 0x16: IGMPv2 Membership Report messages
+    - 0x17: Leave Group messages
+
+v3-query format extention to above:
+```
+minor change: max response time (v2) --> max response code (v3)
++---------------------------------------------------------------+
+| Resv  |S| QRV |     QQIC      |     Number of Sources (N)     |
++---------------------------------------------------------------+
+|                       Source Address (1)                      |
++-                                                             -+
+|                       Source Address (2)                      |
++-                              .                              -+
+.                               .                               .
+.                               .                               .
++-                                                             -+
+|                       Source Address (N)                      |
++---------------------------------------------------------------+
+
+where:
+| Reserved: 4 bits 
+| Suppress Router-side Processing (S): 1 bit 
+| Querier's Robustness Variable (QRV): 3 bits 
+| Querier's Query Interval Code (QQIC): 8 bits 
+| Number of Sources (N): 16 bits
+| Source Address [i]: 32 bits
+
+```
+ref: [IGMPv3 Membership Report Format](https://support.huawei.com/enterprise/en/doc/EDOC1100174721/d8195479/igmpv3-membership-report-message) : `Type = 0x22`
+
+- **Protocol Stack** <br>
+    The IGMPv1 Message is encapsulated in IP, and the value of the **protocol type field in the IP header is `0x02`**, indicating that the IGMP message is encapsulated in the data part. The destination address field in the IP header identifies the destination address of the IGMP message. The **time to live (TTL) value in the IP header is 1**, indicating that the IGMP message is transmitted only in the local network segment.
+- IGMP has several versions, [(v1, v2, v3)](https://www.geeksforgeeks.org/computer-networks/what-is-igmpinternet-group-management-protocol/) ... (v0 is obsolete)
+
+- **Types of IGMP Messages**
+    - Membership Query: Sent by routers to discover which multicast groups have active members on a network segment.
+    - Membership Report: Sent by hosts to indicate interest in joining a multicast group.
+    - Leave Group: Sent by hosts when they no longer wish to receive traffic for a multicast group. (not for v1, its updated based on timeout)
+
+- How to distinguish between v2 and v3? probably by checking if payload length of ip header is greater than IGMPv2 header struct, then read the excess data and assume it to be having further info as its IGMPv3.
+- Why so many different verions? mainly each exercise different `membership report` formats, only for those type codes differ (as far as i have noticed).

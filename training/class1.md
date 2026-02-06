@@ -7,3 +7,14 @@ https://docs.google.com/document/d/15CoWay6-M56UoN6DcWov0bCpfXzcsfJhm1g2H_nA2HE/
 
 ref: my docs here:
 https://docs.google.com/document/d/11GMobK0O21rQDGCR71WXoVzYhX9lAgUnxje1UQ0AJm4/edit?tab=t.fj58x88oneeb#heading=h.ksfrdmxzd9iz
+
+test switch:
+- user: admin
+- password: Netgear@@123
+
+cmds:
+- `ls /dev/tty` - list of available ttys, usb connections to switch connection will appear with USB..
+- `screen /dev/ttyUSB0 115200` - access console using screen, baudrate:115200, need to be mention for serial conn
+- `minicom -D /dev/ttyUSB0 -b 115200` -- access via mini com similarly
+- `show serviceport` - inside console, to check OOB connection ip
+

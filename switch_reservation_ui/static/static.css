@@ -1,0 +1,51 @@
+/* static/style.css - additional adjustments */
+
+/* small copy / health / control buttons slightly smaller */
+.btn.btn-sm {
+  font-size: 0.82rem;
+  padding: 0.18rem 0.35rem;
+}
+
+/* specific styling for copy buttons to add gap */
+.btn-copy {
+  margin-left: 6px;
+  margin-right: 6px;
+}
+
+/* health refresh button styling - small and spaced */
+.btn-health-refresh {
+  margin-left: 6px;
+  padding: 0.12rem 0.25rem;
+  font-size: 0.78rem;
+}
+
+/* small spacing between text and inline icons in cells */
+.mgmt-cell span,
+.console-cell span {
+  margin-right: 6px;
+}
+
+/* ensure Actions column stacks buttons vertically with small gap */
+.actions-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start; /* left align buttons */
+}
+
+/* reservation duration group small spacing */
+.duration-group {
+  gap: 6px;
+}
+
+/* slightly reduce input vertical size so buttons align nicely */
+.form-control-sm {
+  padding: 0.25rem 0.4rem;
+  font-size: 0.9rem;
+}
+
+/* optional: ensure table rows have consistent vertical spacing */
+.table td {
+  vertical-align: middle;
+  padding: 0.45rem 0.55rem;
+}

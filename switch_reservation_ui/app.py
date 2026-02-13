@@ -1,346 +1,381 @@
 # app.py
-# Minimal Flask backend:
-# - reads/writes CSV as the single source of truth (with FileLock)
-# - /api/devices -> returns devices + derived reservation fields
-# - /api/reserve  -> reserve a free device (sets resv_end_time = now + duration)
-# - /api/release  -> release device (tag -> free)
-# - /api/events   -> SSE stream of full snapshot every 1s (frontend updates)
-# - /api/ping     -> pings the device's mgmt_ip using system ping (used for Health column)
-
 import csv
-import json
-import os
+import threading
 import time
-import subprocess
-from datetime import datetime, timedelta, timezone
-from flask import Flask, jsonify, request, render_template, Response, stream_with_context
+import datetime
+import os
+import ipaddress
 from filelock import FileLock
+from flask import Flask, jsonify, request, render_template, send_from_directory
+import paramiko
+import traceback
 
-# CONFIG
-CSV_FILE = os.path.join(os.path.dirname(__file__), "database.csv")
-CSV_LOCK = CSV_FILE + ".lock"
+# -----------------------
+# Global Config (from your spec)
+# -----------------------
+PI_IP = "10.25.4.200"
+SSH_USER = "host1"
+SSH_PASSWORD = "sheldon123"
+CONSOLE_IP = "192.168.1.102"
+PORT_OFFSET = 10000
 
-# EXACT schema you requested
-FIELDNAMES = [
-    "device_name",
-    "model_name",
-    "remote_link",
-    "mgmt_ip",
-    "console_ip",
-    "server_port",
-    "tag",            # 'resv' or 'free'
-    "current_user",
-    "resv_end_time"   # ISO 8601 or 'NA' for permanent
-]
+AV_UI = {"port": 4443, "offset": 60000}
+MAIN_UI = {"port": 49152, "offset": 51000}
+MAIN_UI_OLD = {"port": 49151, "offset": 50000}
 
-app = Flask(__name__, static_folder="static", template_folder="templates")
+UP_HEALTH_TIMER = 10        # seconds
+DOWN_HEALTH_TIMER = 2       # seconds
+MAX_HEALTH_CHECK_RETRIES = 3
 
+CSV_PATH = "database.csv"
+CSV_LOCK_PATH = CSV_PATH + ".lock"
 
-def ensure_csv_exists():
-    """Ensure file exists and has header row."""
-    if not os.path.exists(CSV_FILE):
-        with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-            writer.writeheader()
+# -----------------------
+# Backend state
+# -----------------------
+device_state = {}
+device_state_lock = threading.Lock()
 
-
-def parse_iso_or_na(s):
-    """Parse ISO 8601 string to aware UTC datetime; return 'NA' (string) if NA; None if empty/invalid."""
-    if not s:
-        return None
-    s = s.strip()
-    if s.upper() == "NA":
-        return "NA"
+def is_valid_ipv4(addr):
     try:
-        dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
+        ipaddress.IPv4Address(addr)
+        return True
     except Exception:
-        # try trailing Z
-        try:
-            if s.endswith("Z"):
-                return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
-        except Exception:
-            return None
+        return False
 
-
-def read_devices():
-    """
-    Read CSV and attach _derived reservation info used by UI.
-
-    Behavior / rules:
-    - resv_end_time may be 'NA' (means permanent/static).
-    - If resv_end_time is parseable to a datetime:
-        * If we can find an explicit duration (resv_duration_min) use it to compute start = end - duration.
-        * Otherwise assume start = now and duration = end - now (per your instruction).
-    - If values are not applicable (e.g., permanent reservation), we set fields to 'NA' where appropriate.
-    - The function produces a human-friendly `display_text`:
-        "User: {current_user}, Duration: {HH:MM} . {time_left} left
-         Start: {start_iso or NA} End: {end_iso or NA}"
-      (time values formatted HH:MM)
-    """
-    ensure_csv_exists()
+def read_devices_from_csv():
     devices = []
-    with FileLock(CSV_LOCK):
-        with open(CSV_FILE, newline="", encoding="utf-8") as f:
+    lock = FileLock(CSV_LOCK_PATH, timeout=10)
+    with lock:
+        with open(CSV_PATH, newline='') as f:
             reader = csv.DictReader(f)
-            for row in reader:
-                devices.append(dict(row))
-
-    now = datetime.now(timezone.utc)
-
-    def secs_to_hhmm(secs):
-        """Convert seconds -> 'HH:MM' string, clamps negative to 00:00."""
-        if secs is None:
-            return "NA"
-        s = max(0, int(secs))
-        hh = s // 3600
-        mm = (s % 3600) // 60
-        return f"{hh:02d}:{mm:02d}"
-
-    for d in devices:
-        # normalize and read raw end value
-        d.setdefault("resv_end_time", (d.get("resv_end_time") or "").strip())
-        tag = (d.get("tag") or "").strip().lower()
-        end_raw = d.get("resv_end_time") or ""
-        parsed_end = parse_iso_or_na(end_raw)  # reused helper: returns datetime, "NA", or None
-
-        # default derived container
-        derived = {
-            "reserved": False,
-            "permanent": False,
-            "end_iso": None,
-            "remaining_seconds": None,
-            "start_iso": None,
-            "duration_seconds": None,
-            "display_text": ""  # formatted string demanded by user
-        }
-
-        if tag == "resv":
-            derived["reserved"] = True
-
-            # handle permanent reservation (NA)
-            if parsed_end == "NA":
-                derived["permanent"] = True
-                derived["end_iso"] = "NA"
-                derived["remaining_seconds"] = None
-                derived["start_iso"] = "NA"
-                derived["duration_seconds"] = None
-
-                # Build display text with NA placeholders
-                user = d.get("current_user") or "NA"
-                derived["display_text"] = (
-                    f"User: {user}, Duration: NA . NA left\n"
-                    f"Start: NA End: NA"
-                )
-
-            # handle parseable end datetime
-            elif isinstance(parsed_end, datetime):
-                end_dt = parsed_end
-                derived["end_iso"] = end_dt.isoformat()
-
-                rem = (end_dt - now).total_seconds()
-                derived["remaining_seconds"] = int(rem) if rem > 0 else 0
-
-                duration_seconds = None
-                if d.get("resv_duration_min"):
-                    try:
-                        duration_seconds = int(d.get("resv_duration_min")) * 60
-                    except Exception:
-                        duration_seconds = None
-
-                # If duration isn't explicitly stored, start = current server read time
-                if duration_seconds is None:
-                    duration_seconds = int(max(0, (end_dt - now).total_seconds()))
-                    start_dt = now 
-                else:
-                    start_dt = end_dt - timedelta(seconds=duration_seconds)
-
-                derived["duration_seconds"] = int(duration_seconds)
-                derived["start_iso"] = start_dt.isoformat()
-
-                # Format textual pieces:
-                user = d.get("current_user") or "NA"
-                duration_hhmm = secs_to_hhmm(derived["duration_seconds"]) if derived["duration_seconds"] is not None else "NA"
-                time_left_hhmm = secs_to_hhmm(derived["remaining_seconds"]) if derived["remaining_seconds"] is not None else "NA"
-                start_text = derived["start_iso"] if derived["start_iso"] is not None else "NA"
-                end_text = derived["end_iso"] if derived["end_iso"] is not None else "NA"
-
-                # Shorten start/end to human-readable timestamps (ISO is fine; UI may format further)
-                derived["display_text"] = (
-                    f"User: {user}, Duration: {duration_hhmm} . {time_left_hhmm} left\n"
-                    f"Start: {start_text} End: {end_text}"
-                )
-
-            else:
-                # resv tag but end time is empty/invalid - treat as unknown values
-                derived["permanent"] = False
-                derived["end_iso"] = None
-                derived["remaining_seconds"] = None
-                derived["start_iso"] = None
-                derived["duration_seconds"] = None
-
-                user = d.get("current_user") or "NA"
-                derived["display_text"] = (
-                    f"User: {user}, Duration: NA . NA left\n"
-                    f"Start: NA End: NA"
-                )
-        else:
-            # not reserved -> present empty / NA display (free entries can reserve)
-            derived["reserved"] = False
-            derived["permanent"] = False
-            derived["end_iso"] = None
-            derived["remaining_seconds"] = None
-            derived["start_iso"] = None
-            derived["duration_seconds"] = None
-            derived["display_text"] = "NA"
-
-        d["_derived"] = derived
-
+            for r in reader:
+                if not r.get("tag"):
+                    r["tag"] = "free"
+                devices.append(r)
     return devices
 
-
-def write_devices(devices):
-    """Overwrite CSV with the devices list. Uses FileLock."""
-    with FileLock(CSV_LOCK):
-        with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+def write_devices_to_csv(devices):
+    lock = FileLock(CSV_LOCK_PATH, timeout=10)
+    with lock:
+        with open(CSV_PATH, "w", newline='') as f:
+            fieldnames = ["device_id","model_name","hw_id","mgmt_ip","port_id","tag","current_user","duration","resv_end_time"]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for d in devices:
-                # ensure all fields present
-                row = {k: (d.get(k) or "") for k in FIELDNAMES}
-                writer.writerow(row)
+                if not d.get("tag"):
+                    d["tag"] = "free"
+                writer.writerow(d)
 
+def find_device(devices, device_id):
+    for d in devices:
+        if d["device_id"] == device_id:
+            return d
+    return None
+
+# -----------------------
+# Health manager (single SSH session -> sequential pings)
+# -----------------------
+def init_device_state_from_csv():
+    devices = read_devices_from_csv()
+    with device_state_lock:
+        for d in devices:
+            did = d["device_id"]
+            if did not in device_state:
+                device_state[did] = {
+                    "health": "unknown",
+                    "retry_count": 0,
+                    "next_check_ts": time.time() + 1
+                }
+
+def ssh_ping_once(ssh_client, mgmt_ip, count=2, timeout=6):
+    try:
+        cmd = f"ping -c {count} -w {timeout} {mgmt_ip}"
+        stdin, stdout, stderr = ssh_client.exec_command(cmd, timeout=timeout + 5)
+        exit_status = stdout.channel.recv_exit_status()
+        return exit_status == 0
+    except Exception:
+        return False
+
+class HealthManager(threading.Thread):
+    def __init__(self, pi_ip, ssh_user, ssh_password):
+        super().__init__(daemon=True)
+        self.pi_ip = pi_ip
+        self.ssh_user = ssh_user
+        self.ssh_password = ssh_password
+        self.keep_running = True
+        self.ssh_client = None
+        self.ssh_lock = threading.Lock()
+        self.reconnect_backoff = 5
+
+    def ensure_ssh(self):
+        with self.ssh_lock:
+            if self.ssh_client is not None:
+                return True
+            try:
+                client = paramiko.SSHClient()
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                client.connect(self.pi_ip, username=self.ssh_user, password=self.ssh_password, timeout=10)
+                self.ssh_client = client
+                return True
+            except Exception:
+                self.ssh_client = None
+                return False
+
+    def close_ssh(self):
+        with self.ssh_lock:
+            try:
+                if self.ssh_client:
+                    self.ssh_client.close()
+            finally:
+                self.ssh_client = None
+
+    def run_one_cycle(self, check_list):
+        if not check_list:
+            return
+
+        if not self.ensure_ssh():
+            for device_id, mgmt_ip in check_list:
+                with device_state_lock:
+                    st = device_state.get(device_id)
+                    if not st:
+                        continue
+                    st["retry_count"] += 1
+                    st["health"] = "down"
+                    st["next_check_ts"] = time.time() + DOWN_HEALTH_TIMER
+            return
+
+        with self.ssh_lock:
+            client = self.ssh_client
+            for device_id, mgmt_ip in check_list:
+                try:
+                    ok = ssh_ping_once(client, mgmt_ip)
+                except Exception:
+                    ok = False
+                with device_state_lock:
+                    st = device_state.get(device_id)
+                    if not st:
+                        continue
+                    if ok:
+                        st["health"] = "up"
+                        st["retry_count"] = 0
+                        st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+                    else:
+                        st["retry_count"] += 1
+                        st["health"] = "down"
+                        if st["retry_count"] < MAX_HEALTH_CHECK_RETRIES:
+                            st["next_check_ts"] = time.time() + DOWN_HEALTH_TIMER
+                        else:
+                            st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+
+    def run(self):
+        while self.keep_running:
+            try:
+                now = time.time()
+                check_list_ids = []
+                with device_state_lock:
+                    for did, st in device_state.items():
+                        if st["next_check_ts"] <= now:
+                            check_list_ids.append(did)
+                if check_list_ids:
+                    csv_devices = read_devices_from_csv()
+                    mgmt_map = {d["device_id"]: d["mgmt_ip"] for d in csv_devices}
+                    to_ping = []
+                    for did in check_list_ids:
+                        mgmt = mgmt_map.get(did)
+                        # skip devices without a valid mgmt_ip (health stays 'unknown')
+                        if mgmt and is_valid_ipv4(mgmt):
+                            to_ping.append((did, mgmt))
+                        else:
+                            # set unknown if missing/invalid mgmt_ip
+                            with device_state_lock:
+                                st = device_state.get(did)
+                                if st:
+                                    st["health"] = "unknown"
+                                    st["retry_count"] = 0
+                                    st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+                    self.run_one_cycle(to_ping)
+                else:
+                    time.sleep(0.7)
+            except Exception:
+                traceback.print_exc()
+                self.close_ssh()
+                time.sleep(self.reconnect_backoff)
+
+    def stop(self):
+        self.keep_running = False
+        self.close_ssh()
+
+health_manager = HealthManager(PI_IP, SSH_USER, SSH_PASSWORD)
+
+# -----------------------
+# Flask app + API
+# -----------------------
+app = Flask(__name__, static_folder="static", template_folder="templates")
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
+def format_reservation_block(d):
+    """
+    Returns the reservation block string exactly in the desired format (keeps newline).
+    If tag == resv: full block with User, Duration hh/mm, Time Left, Start, End.
+    If tag == static: show owner only.
+    If tag == free: empty string (frontend will show inputs).
+    """
+    tag = (d.get("tag") or "").lower()
+    if tag == "resv":
+        current_user = d.get("current_user") or "-"
+        # compute hh/mm from duration
+        dur = d.get("duration") or ""
+        try:
+            dur_min = int(dur)
+        except Exception:
+            dur_min = 0
+        hh = dur_min // 60
+        mm = dur_min % 60
+        resv_end = d.get("resv_end_time") or ""
+        try:
+            end_dt = datetime.datetime.fromisoformat(resv_end) if resv_end else None
+        except Exception:
+            end_dt = None
+        now = datetime.datetime.utcnow()
+        time_left = ""
+        if end_dt:
+            delta = end_dt - now
+            if delta.total_seconds() > 0:
+                th = int(delta.total_seconds() // 3600)
+                tm = int((delta.total_seconds() % 3600) // 60)
+                ts = int(delta.total_seconds() % 60)
+                time_left = f"{th:02d}:{tm:02d}:{ts:02d}"
+            else:
+                time_left = "00:00:00"
+            start_dt = end_dt - datetime.timedelta(minutes=dur_min) if dur_min else None
+            start_str = start_dt.strftime("%d-%m-%Y %H:%M") if start_dt else "-"
+            end_str = end_dt.strftime("%d-%m-%Y %H:%M")
+        else:
+            time_left = "-"
+            start_str = "-"
+            end_str = "-"
+        # preserve requested format as closely as possible
+        return f"User: {current_user}, Duration: {hh}hrs,{mm}mins, Time Left: {time_left}\nStart: {start_str} End: {end_str}"
+    elif tag == "static":
+        owner = d.get("current_user") or "-"
+        return f"Owner: {owner}"
+    else:
+        return ""
 
 @app.route("/api/devices", methods=["GET"])
 def api_devices():
-    """Return current devices snapshot (with derived fields)."""
-    return jsonify(read_devices())
-
+    devices = read_devices_from_csv()
+    now = datetime.datetime.utcnow()
+    output = []
+    with device_state_lock:
+        for d in devices:
+            did = d["device_id"]
+            mgmt = d.get("mgmt_ip") or ""
+            # if mgmt missing/invalid => health unknown
+            if not mgmt or not is_valid_ipv4(mgmt):
+                health = "unknown"
+                retry_count = 0
+            else:
+                st = device_state.get(did, {"health":"unknown","retry_count":0,"next_check_ts":time.time()+1})
+                health = st["health"]
+                retry_count = st["retry_count"]
+            resv_block = format_reservation_block(d)
+            output.append({
+                **d,
+                "health": health,
+                "retry_count": retry_count,
+                "resv_block": resv_block
+            })
+    return jsonify({"devices": output})
 
 @app.route("/api/reserve", methods=["POST"])
 def api_reserve():
-    """
-    Reserve a device.
-    Request JSON: { device_name, owner, duration_minutes }
-    Behavior:
-      - If device exists and tag == free: set tag=resv, current_user=owner, resv_end_time = now + duration
-      - Return start_iso, end_iso and duration_seconds so UI can show start/duration immediately.
-    """
-    payload = request.get_json() or {}
-    device_name = payload.get("device_name")
-    owner = (payload.get("owner") or "").strip()
-    try:
-        duration_min = int(payload.get("duration_minutes", 0))
-    except Exception:
-        duration_min = 0
-
-    if not device_name or not owner or duration_min <= 0:
-        return jsonify({"ok": False, "error": "device_name, owner and duration_minutes (>0) required"}), 400
-
-    devices = read_devices()
-    found = False
-    now = datetime.now(timezone.utc)
-    end_time = now + timedelta(minutes=duration_min)
-    for d in devices:
-        if d.get("device_name") == device_name:
-            found = True
-            if (d.get("tag") or "").strip().lower() == "resv":
-                return jsonify({"ok": False, "error": "device already reserved"}), 409
-            d["tag"] = "resv"
-            d["current_user"] = owner
-            d["resv_end_time"] = end_time.isoformat()
-            break
-
-    if not found:
-        return jsonify({"ok": False, "error": "device not found"}), 404
-
-    write_devices(devices)
-    return jsonify({
-        "ok": True,
-        "start_iso": now.isoformat(),
-        "end_iso": end_time.isoformat(),
-        "duration_seconds": duration_min * 60
-    })
-
+    body = request.get_json()
+    device_id = body.get("device_id")
+    user = body.get("user")
+    hours = int(body.get("hours", 0))
+    minutes = int(body.get("minutes", 0))
+    duration_minutes = hours * 60 + minutes
+    if not device_id or not user:
+        return jsonify({"error": "device_id and user required"}), 400
+    devices = read_devices_from_csv()
+    d = find_device(devices, device_id)
+    if not d:
+        return jsonify({"error": "device not found"}), 404
+    now = datetime.datetime.utcnow()
+    end = now + datetime.timedelta(minutes=duration_minutes)
+    d["current_user"] = user
+    d["duration"] = str(duration_minutes)
+    d["resv_end_time"] = end.isoformat()
+    d["tag"] = "resv"   # set to 'resv' per your requirement
+    write_devices_to_csv(devices)
+    return jsonify({"ok": True, "resv_end_time": d["resv_end_time"]})
 
 @app.route("/api/release", methods=["POST"])
 def api_release():
-    """Release a reservation (set tag=free and clear user/end_time)."""
-    payload = request.get_json() or {}
-    device_name = payload.get("device_name")
-    if not device_name:
-        return jsonify({"ok": False, "error": "device_name required"}), 400
-
-    devices = read_devices()
-    found = False
-    for d in devices:
-        if d.get("device_name") == device_name:
-            found = True
-            d["tag"] = "free"
-            d["current_user"] = ""
-            d["resv_end_time"] = ""
-            break
-
-    if not found:
-        return jsonify({"ok": False, "error": "device not found"}), 404
-
-    write_devices(devices)
+    body = request.get_json()
+    device_id = body.get("device_id")
+    if not device_id:
+        return jsonify({"error": "device_id required"}), 400
+    devices = read_devices_from_csv()
+    d = find_device(devices, device_id)
+    if not d:
+        return jsonify({"error": "device not found"}), 404
+    d["current_user"] = ""
+    d["duration"] = ""
+    d["resv_end_time"] = ""
+    d["tag"] = "free"
+    write_devices_to_csv(devices)
     return jsonify({"ok": True})
 
+@app.route("/api/refresh_health", methods=["POST"])
+def api_refresh_health():
+    body = request.get_json()
+    device_id = body.get("device_id")
+    if not device_id:
+        return jsonify({"error": "device_id required"}), 400
+    with device_state_lock:
+        st = device_state.get(device_id)
+        if not st:
+            device_state[device_id] = {
+                "health": "unknown",
+                "retry_count": 0,
+                "next_check_ts": time.time() + 0.1
+            }
+        else:
+            st["retry_count"] = 0
+            st["next_check_ts"] = time.time() + 0.1
+    return jsonify({"ok": True})
 
-@app.route("/api/events")
-def api_events():
-    """SSE stream: emit full snapshot every 1 second."""
-    def gen():
-        try:
-            while True:
-                yield f"data: {json.dumps(read_devices(), default=str)}\n\n"
-                time.sleep(1)
-        except GeneratorExit:
-            return
-    return Response(stream_with_context(gen()), mimetype="text/event-stream")
+@app.route("/api/compute_ports", methods=["POST"])
+def api_compute_ports():
+    data = request.get_json()
+    mgmt_ip = data.get("mgmt_ip")
+    if not mgmt_ip:
+        return jsonify({"error":"mgmt_ip required"}), 400
+    last_octet = int(mgmt_ip.strip().split(".")[-1])
+    av_port = AV_UI["offset"] + last_octet
+    old_main_port = MAIN_UI_OLD["offset"] + last_octet
+    new_main_port = MAIN_UI["offset"] + last_octet
+    return jsonify({
+        "switch_id": last_octet,
+        "av_port": av_port,
+        "old_main_port": old_main_port,
+        "new_main_port": new_main_port
+    })
 
+@app.route('/static/<path:p>')
+def static_files(p):
+    return send_from_directory('static', p)
 
-@app.route("/api/ping")
-def api_ping():
-    """
-    Ping endpoint used by frontend to check health.
-    Query param: device=<device_name>
-    Implementation: uses system 'ping -c 1 -W 1 <ip>' (Linux). Returns JSON { ok: True, up: True/False }.
-    NOTE: Using system ping keeps the backend simple for this PoC. On some environments ping may need special permissions.
-    """
-    device_name = request.args.get("device")
-    if not device_name:
-        return jsonify({"ok": False, "error": "device query param required"}), 400
-
-    devices = read_devices()
-    target = None
-    for d in devices:
-        if d.get("device_name") == device_name:
-            target = d.get("mgmt_ip")
-            break
-    if not target:
-        return jsonify({"ok": False, "error": "device not found"}), 404
-
-    # Run one ping with 1s timeout
-    try:
-        # -c1 : 1 packet, -W1 : wait time 1 sec (Linux)
-        res = subprocess.run(["ping", "-c", "1", "-W", "1", target],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        up = (res.returncode == 0)
-    except Exception:
-        up = False
-
-    return jsonify({"ok": True, "up": up})
-
+def start_background_services():
+    init_device_state_from_csv()
+    health_manager.start()
 
 if __name__ == "__main__":
-    # development server
+    start_background_services()
     app.run(host="0.0.0.0", port=5000, debug=True)

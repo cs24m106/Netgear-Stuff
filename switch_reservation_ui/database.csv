@@ -1,4 +1,13 @@
-device_name,model_name,remote_link,mgmt_ip,console_ip,server_port,tag,current_user,resv_end_time
-swi-chn-p8,m4250-gtx50-av,https://localhost/51160,192.168.1.125,10.2.160.102,10025,free,,
-switch-b,m4250-9000,https://localhost/51161,192.168.1.126,10.2.160.103,10026,resv,alice,2026-02-12T12:00:00Z
-switch-c,m4250-9001,https://localhost/51162,192.168.1.127,10.2.160.104,10027,resv,bob,NA
+device_id,model_name,hw_id,mgmt_ip,port_id,tag,current_user,duration,resv_end_time
+ng-370,M4250-40G8F-PoE+,GSM4248P V1,,1,,,,
+ng-376,M4250-10G2F-PoE+,GSM4212P V1,192.168.1.132,5,,,,
+ng-377,M4250-10G2F-PoE+,GSM4212P V1,192.168.1.160,7,,,,
+ng-369,M4250-40G8XF-PoE++,GSM4248UX V1,192.168.1.125,9,,,,
+ng-371,M4350-24X4V,XSM4328CV V1,192.168.1.159,13,,,,
+ng-356,M4350-40F4C,XSM4344FC V1,192.168.1.103,14,,,,
+ng-378,M4350-12X12F,XSM4344FC V1,192.168.1.161,17,,,,
+ng-348,M4350-24X4F,XSM4328CV V1,192.168.1.161,18,,,,
+ng-380,M4350-8X8F,XSM4316 V1,192.168.1.188,21,,,,
+ng-331,M4350-8M2V,MSM4310 V1,192.168.1.169,22,,,,
+6YXF5C5GA04DE,M4250-8G2XF-PoE+,GSM4210PX V1,,25,,,,
+ng-381,M4250-8G2XF-PoE+,GSM4210PX V1,,29,,,,

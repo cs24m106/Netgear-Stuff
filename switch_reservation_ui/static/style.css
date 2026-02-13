@@ -1,0 +1,36 @@
+body { font-family: Arial, Helvetica, sans-serif; padding: 16px; }
+h1 { margin-bottom: 8px; }
+table { border-collapse: collapse; width: 100%; margin-top: 12px; table-layout: fixed; }
+th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
+th { background-color: #2f4f4f; color: white; padding-top: 10px; padding-bottom: 10px;}
+tr:nth-child(even){background-color: #f9f9f9;}
+td .left-block { display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
+.btn { padding: 6px 8px; border: 1px solid #888; border-radius: 4px; cursor: pointer; background: white; display:inline-flex; align-items:center; justify-content:center; }
+.small { font-size: 0.9em; padding: 4px 6px; }
+.icon-only { width:28px; height:28px; padding: 2px; font-size:16px; }
+.copy-btn { margin-left: 6px; }
+.resv-info { font-size:0.9em; white-space: pre-line; font-family: monospace; }
+
+/* align contents to left inside td */
+td > div { display:flex; flex-direction:column; align-items:flex-start; }
+
+/* status colors */
+.status-free { color: #0b6623; font-weight: bold; background:#e8f6ec; padding:4px 6px; border-radius:4px; }
+.status-resv { color: #b45f04; font-weight: bold; background:#fff4e6; padding:4px 6px; border-radius:4px; }
+.status-static { color: #555; font-weight: bold; background:#f2f2f2; padding:4px 6px; border-radius:4px; }
+
+/* health colors */
+.health-up { color: #0b6623; font-weight: bold; }
+.health-down { color: #c62828; font-weight: bold; }
+.health-unknown { color: #6c757d; font-weight: bold; }
+
+/* action button colors */
+.action-reserve { background:#e8f6ec; color:#0b6623; border-color:#8fd19a; }
+.action-release { background:#fff4e6; color:#b45f04; border-color:#e6c79a; }
+
+/* keep input boxes compact */
+.input-compact { width:48px; padding:4px; margin-right:6px; }
+.input-user { width:110px; padding:4px; margin-right:6px; }
+
+/* table cell word wrap */
+td { overflow: hidden; text-overflow: ellipsis; }

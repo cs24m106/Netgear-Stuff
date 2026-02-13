@@ -1,2 +1,4 @@
-Flask>=2.2
-filelock>=3.12
+Flask>=2.3.3
+paramiko>=3.4.0
+filelock>=3.12.2
+python-dotenv>=1.0.0

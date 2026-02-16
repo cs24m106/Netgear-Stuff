@@ -1,30 +1,42 @@
-// static/app.js
+// static/main.js
 const POLL_INTERVAL = 3000; // ms
 
 async function fetchDevices() {
   const r = await fetch("/api/devices");
-  const j = await r.json();
-  return j.devices;
+  return r.json().then(j => j.devices);
 }
 
-function computeUIUrls(mgmt_ip) {
-  if (!mgmt_ip) return null;
-  const last = parseInt(mgmt_ip.trim().split('.').slice(-1)[0], 10);
-  if (Number.isNaN(last)) return null;
-  const av_port = 60000 + last;
-  const old_main_port = 50000 + last;
-  const new_main_port = 51000 + last;
-  return {
-    av: `http://localhost:${av_port}/`,
-    old_main: `http://localhost:${old_main_port}/`,
-    new_main: `http://localhost:${new_main_port}/`
-  };
+async function updateConfigs(mgmt_ip, port_id) {
+  if (!mgmt_ip || mgmt_ip === '-') return null;
+
+  try {
+    const response = await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mgmt_ip: mgmt_ip, port_id: port_id})
+    });
+    
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    return {
+      av: `http://localhost:${data.av_port}/`,
+      new_main: `http://localhost:${data.new_main_port}/`,
+      old_main: `http://localhost:${data.old_main_port}/`,
+      console_ip: data.console_ip,
+      device_port: data.device_port,
+    };
+  } catch (e) {
+    console.error("Error fetching configs:", e);
+    return null;
+  }
 }
 
 function copyToClipboard(text) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text);
   } else {
+    // Fallback
     const ta = document.createElement('textarea');
     ta.value = text;
     document.body.appendChild(ta);
@@ -35,180 +47,177 @@ function copyToClipboard(text) {
 }
 
 async function reserveDevice(device_id, user, hours, minutes) {
-  const r = await fetch("/api/reserve", {
+  return fetch("/api/reserve", {
     method:"POST",
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({device_id, user, hours, minutes})
-  });
-  return r.json();
-}
-async function releaseDevice(device_id) {
-  const r = await fetch("/api/release", {
-    method:"POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({device_id})
-  });
-  return r.json();
-}
-async function refreshHealth(device_id) {
-  const r = await fetch("/api/refresh_health", {
-    method:"POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({device_id})
-  });
-  return r.json();
+  }).then(r => r.json());
 }
 
-// Create a row (first time)
+async function releaseDevice(device_id) {
+  return fetch("/api/release", {
+    method:"POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({device_id})
+  }).then(r => r.json());
+}
+
+// Create a row (layout structure)
 function createRow(d) {
   const tbody = document.querySelector("#devices_table tbody");
   const tr = document.createElement("tr");
   tr.id = `row-${d.device_id}`;
 
-  // Id
+  // 0: Id (Left)
   const tdId = document.createElement('td');
+  tdId.className = 'col-left';
   tdId.textContent = d.device_id;
   tr.appendChild(tdId);
 
-  // Model
+  // 1: Model (Left)
   const tdModel = document.createElement('td');
+  tdModel.className = 'col-left';
   tdModel.textContent = d.model_name || '';
   tr.appendChild(tdModel);
 
-  // Hardware
+  // 2: Hardware (Left)
   const tdHw = document.createElement('td');
+  tdHw.className = 'col-left';
   tdHw.textContent = d.hw_id || '';
   tr.appendChild(tdHw);
 
-  // UI (three hyperlinks) - may be null if mgmt_ip invalid/missing
+  // 3: UI (Center)
   const tdUi = document.createElement('td');
-  tdUi.className = 'left-block';
+  tdUi.className = 'col-center';
   tr.appendChild(tdUi);
 
-  // Mgmt-Ip + copy (minimal icon)
+  // 4: Mgmt-Ip (Left Text, Right Icon)
   const tdMgmt = document.createElement('td');
-  tdMgmt.className = 'left-block';
+  tdMgmt.className = 'col-left'; 
   tr.appendChild(tdMgmt);
 
-  // Console-Port & telnet copy
+  // 5: Console-Port (Left Text, Right Icon)
   const tdConsole = document.createElement('td');
-  tdConsole.className = 'left-block';
+  tdConsole.className = 'col-left';
   tr.appendChild(tdConsole);
 
-  // Health column (health text + refresh icon)
+  // 6: Health (Left Text, Right Icon)
   const tdHealth = document.createElement('td');
-  tdHealth.className = 'left-block';
+  tdHealth.className = 'col-left';
   tr.appendChild(tdHealth);
 
-  // Status column
+  // 7: Status (Center)
   const tdStatus = document.createElement('td');
-  tdStatus.className = 'left-block';
+  tdStatus.className = 'col-center';
   tr.appendChild(tdStatus);
 
-  // Reservation column (preformatted)
+  // 8: Reservation (Left - contains Inputs or Info)
   const tdResv = document.createElement('td');
-  tdResv.className = 'resv-info left-block';
+  tdResv.className = 'col-left';
   tr.appendChild(tdResv);
 
-  // Actions column (inputs + buttons) left aligned
+  // 9: Actions (Center - contains Buttons)
   const tdActions = document.createElement('td');
-  tdActions.className = 'left-block';
+  tdActions.className = 'col-center';
   tr.appendChild(tdActions);
 
   tbody.appendChild(tr);
-
-  // for future updates we will keep references
   return tr;
 }
 
-// Update row cells (without destroying user input if editing)
+// Update row cells
 function updateRow(d) {
   const tr = document.getElementById(`row-${d.device_id}`) || createRow(d);
 
-  // UI cell
+  // --- 4: Mgmt-Ip (Flex: Text Left, Icon Right) ---
+  const tdMgmt = tr.children[4];
+  tdMgmt.innerHTML = '';
+  const mgmtContainer = document.createElement('div');
+  mgmtContainer.className = 'cell-flex';
+  
+  const mgmtText = document.createElement('span');
+  mgmtText.textContent = d.mgmt_ip || '-';
+  mgmtContainer.appendChild(mgmtText);
+
+  if (d.mgmt_ip) {
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'btn icon-only';
+      copyBtn.title = `ssh admin@${d.mgmt_ip}`;
+      copyBtn.innerText = '⧉';
+      copyBtn.onclick = () => copyToClipboard(copyBtn.title);
+      mgmtContainer.appendChild(copyBtn);
+  }
+  tdMgmt.appendChild(mgmtContainer);
+
+  // --- 3: UI (Stacked Links) & 5: Console (Flex: Text Left, Icon Right) ---
   const tdUi = tr.children[3];
-  tdUi.innerHTML = '';
-  if (d.mgmt_ip && d.mgmt_ip.trim() !== '') {
-    const urls = computeUIUrls(d.mgmt_ip);
-    if (urls) {
-      const a1 = document.createElement('a'); a1.href = urls.av; a1.innerText = "AV"; a1.target = "_blank";
-      const a2 = document.createElement('a'); a2.href = urls.old_main; a2.innerText = "Main(old)"; a2.target = "_blank";
-      const a3 = document.createElement('a'); a3.href = urls.new_main; a3.innerText = "Main(new)"; a3.target = "_blank";
-      tdUi.appendChild(a1); tdUi.appendChild(document.createTextNode(" | "));
-      tdUi.appendChild(a2); tdUi.appendChild(document.createTextNode(" | "));
-      tdUi.appendChild(a3);
+  const tdConsole = tr.children[5];
+  const portVal = parseInt(d.port_id || '0', 10);
+  // We call the async function and handle the result when it arrives
+  updateConfigs(d.mgmt_ip, portVal).then(config => {
+    tdUi.innerHTML = ''; // Clear previous content
+    tdConsole.innerHTML = '';
+    if (config) {
+      const container = document.createElement('div');
+      container.className = 'ui-stack';
+      
+      container.innerHTML = `
+        <a href="${config.av}" target="_blank">AV</a>
+        <a href="${config.new_main}" target="_blank">Main(new)</a>
+        <a href="${config.old_main}" target="_blank">Main(old)</a>
+      `;
+      tdUi.appendChild(container);
     } else {
       tdUi.textContent = "—";
     }
-  } else {
-    tdUi.textContent = "—";
-  }
 
-  // Mgmt-Ip cell
-  const tdMgmt = tr.children[4];
-  tdMgmt.innerHTML = '';
-  const mgmtLine = document.createElement('div');
-  mgmtLine.textContent = d.mgmt_ip || '-';
-  mgmtLine.style.marginBottom = '6px';
-  const copySsh = document.createElement('button');
-  copySsh.className = 'btn icon-only';
-  copySsh.title = `Copy ssh admin@${d.mgmt_ip || ''}`;
-  copySsh.innerText = '⧉';
-  copySsh.onclick = () => { if (d.mgmt_ip) copyToClipboard(`ssh admin@${d.mgmt_ip}`); };
-  mgmtLine.appendChild(copySsh);
-  tdMgmt.appendChild(mgmtLine);
+    const consContainer = document.createElement('div');
+    consContainer.className = 'cell-flex';
 
-  // Console port cell
-  const tdConsole = tr.children[5];
-  tdConsole.innerHTML = '';
-  const portVal = parseInt(d.port_id || '0', 10);
-  const consolePort = (Number.isNaN(portVal)) ? '-' : (portVal + 10000);
-  const portLine = document.createElement('div');
-  portLine.textContent = (Number.isNaN(portVal) ? '-' : portVal);
-  portLine.style.marginBottom = '6px';
-  const copyTel = document.createElement('button');
-  copyTel.className = 'btn icon-only';
-  copyTel.title = `Copy telnet ${"192.168.1.102"} ${consolePort}`;
-  copyTel.innerText = '⧉';
-  copyTel.onclick = () => {
-    if (!Number.isNaN(portVal)) copyToClipboard(`telnet ${"192.168.1.102"} ${consolePort}`);
-  };
-  portLine.appendChild(copyTel);
-  tdConsole.appendChild(portLine);
+    const consText = document.createElement('span');
+    consText.textContent = (Number.isNaN(portVal) ? '-' : portVal);
+    consContainer.appendChild(consText);
 
-  // Health cell (colorize and include refresh icon, left aligned)
+    if (!Number.isNaN(portVal)) {
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'btn icon-only';
+      copyBtn.title = `telnet ${config.console_ip} ${config.device_port}`;
+      copyBtn.innerText = '⧉';
+      copyBtn.onclick = () => copyToClipboard(copyBtn.title);
+      consContainer.appendChild(copyBtn);
+    }
+    tdConsole.appendChild(consContainer);
+      
+  });
+
+  // --- 6: Health (Up/Down/Unknown only) ---
   const tdHealth = tr.children[6];
   tdHealth.innerHTML = '';
-  const healthDiv = document.createElement('div');
+  const healthContainer = document.createElement('div');
+  healthContainer.className = 'cell-flex'; // Use flex to align refresh button right
+  
   const healthSpan = document.createElement('span');
-  const health = (d.health || 'unknown').toLowerCase();
-  if (health === 'up') {
-    healthSpan.className = 'health-up';
-    healthSpan.innerText = 'up';
-  } else if (health === 'down') {
-    healthSpan.className = 'health-down';
-    healthSpan.innerText = 'down' + (d.retry_count ? ` (${d.retry_count})` : '');
-  } else {
-    healthSpan.className = 'health-unknown';
-    healthSpan.innerText = 'unknown';
-  }
-  healthDiv.appendChild(healthSpan);
+  const health = (d.health || 'unk').toLowerCase();
+  
+  healthSpan.innerText = health; 
+  if (health === 'up') healthSpan.className = 'health-up';
+  else if (health === 'down') healthSpan.className = 'health-down';
+  else healthSpan.className = 'health-unk';
+  
+  healthContainer.appendChild(healthSpan);
 
   const refreshBtn = document.createElement('button');
   refreshBtn.className = 'btn icon-only';
-  refreshBtn.title = 'Refresh health';
+  refreshBtn.title = 'Refresh';
   refreshBtn.innerText = '↻';
-  refreshBtn.style.marginLeft = '8px';
   refreshBtn.onclick = async () => {
     await fetch("/api/refresh_health", {method:"POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({device_id:d.device_id})});
-    // small optimistic UI change
-    healthSpan.innerText = 'checking...';
-    setTimeout(()=> { /* next poll will update */ }, 400);
+    healthSpan.innerText = '...';
   };
-  healthDiv.appendChild(refreshBtn);
-  tdHealth.appendChild(healthDiv);
+  healthContainer.appendChild(refreshBtn);
+  tdHealth.appendChild(healthContainer);
 
-  // Status cell (colorize)
+  // --- 7: Status ---
   const tdStatus = tr.children[7];
   tdStatus.innerHTML = '';
   const tag = (d.tag || 'free').toLowerCase();
@@ -223,116 +232,126 @@ function updateRow(d) {
     statusSpan.className = 'status-static';
     statusSpan.innerText = 'Static';
   } else {
-    statusSpan.className = 'status-static';
     statusSpan.innerText = tag;
   }
   tdStatus.appendChild(statusSpan);
 
-  // Reservation cell — use server-provided resv_block string (keep newlines)
+  // --- 8 & 9: Reservation (Inputs) & Actions (Buttons) ---
   const tdResv = tr.children[8];
-  tdResv.innerHTML = '';
-  if (d.resv_block && d.resv_block.trim() !== '') {
-    const pre = document.createElement('pre');
-    pre.style.margin = '0';
-    pre.style.fontFamily = 'monospace';
-    pre.style.whiteSpace = 'pre-line';
-    pre.textContent = d.resv_block;
-    tdResv.appendChild(pre);
-  } else {
-    // empty (free) — will show input fields in actions column instead
-    tdResv.textContent = '';
-  }
-
-  // Actions column: show inputs / buttons depending on tag
   const tdActions = tr.children[9];
-  // If user is actively editing this row, do NOT replace inputs (so we preserve focus/typing)
-  const isEditing = tdActions.getAttribute('data-editing') === '1';
-  if (isEditing) {
-    // skip overwriting while editing
-    return;
+
+  // If user is editing inputs, do NOT overwrite tdResv (check flag on tdResv)
+  const isEditing = tdResv.getAttribute('data-editing') === '1';
+
+  if (!isEditing) {
+    tdResv.innerHTML = '';
+    tdActions.innerHTML = '';
+
+    if (tag === 'free') {
+        // --- Reservation Column gets INPUTS ---
+        const inputsDiv = document.createElement('div');
+        inputsDiv.className = 'resv-inputs';
+
+        const userInp = document.createElement('input');
+        userInp.className = 'input-user';
+        userInp.placeholder = 'User Name';
+        userInp.value = d.current_user || '';
+        
+        const timeRow = document.createElement('div');
+        timeRow.className = 'resv-row';
+        
+        const hrsInp = document.createElement('input');
+        hrsInp.className = 'input-compact';
+        hrsInp.type = 'number';
+        //hrsInp.min = 0;
+        hrsInp.value = 1;
+        // Cyclic Logic: 0 <-> 24
+        hrsInp.addEventListener('input', function() {
+            let val = parseInt(this.value);
+            if (val < 0) this.value = 24;
+            if (val > 24) this.value = 0;
+        });
+        
+        const minsInp = document.createElement('input');
+        minsInp.className = 'input-compact';
+        minsInp.type = 'number';
+        //minsInp.min = 0;
+        //minsInp.max = 59;
+        minsInp.value = 0;
+        // Cyclic Logic: 0 <-> 59
+        minsInp.addEventListener('input', function() {
+            let val = parseInt(this.value);
+            if (val < 0) this.value = 59;
+            if (val > 59) this.value = 0;
+        });
+
+        timeRow.appendChild(hrsInp);
+        timeRow.appendChild(document.createTextNode('hrs'));
+        timeRow.appendChild(minsInp);
+        timeRow.appendChild(document.createTextNode('mins'));
+
+        inputsDiv.appendChild(userInp);
+        inputsDiv.appendChild(timeRow);
+        tdResv.appendChild(inputsDiv);
+
+        // Prevent updates while typing
+        [userInp, hrsInp, minsInp].forEach(el => {
+            el.addEventListener('focus', () => tdResv.setAttribute('data-editing', '1'));
+            el.addEventListener('blur', () => setTimeout(() => tdResv.removeAttribute('data-editing'), 200));
+        });
+
+        // --- Actions Column gets RESERVE BUTTON ---
+        const reserveBtn = document.createElement('button');
+        reserveBtn.className = 'btn action-reserve';
+        reserveBtn.innerText = 'RESERVE';
+        reserveBtn.onclick = async () => {
+            const user = userInp.value.trim();
+            const hrs = parseInt(hrsInp.value || '0', 10);
+            const mins = parseInt(minsInp.value || '0', 10);
+            
+            if (!user) { alert("Please enter a user name"); return; }
+            
+            tdResv.setAttribute('data-editing', '1'); // Lock during request
+            await reserveDevice(d.device_id, user, hrs, mins);
+            tdResv.removeAttribute('data-editing');
+            await fetchAndUpdateSingle(d.device_id);
+        };
+        tdActions.appendChild(reserveBtn);
+
+    } else {
+      if (tag === 'resv') {
+        // --- Reservation Column gets INFO ---
+        const pre = document.createElement('pre');
+        pre.style.margin = '0';
+        pre.style.fontFamily = 'monospace';
+        pre.innerText = d.resv_block || '';
+        tdResv.appendChild(pre);
+
+      } else if (tag === 'static') {
+        // --- Reservation Column gets Static Info ---
+        const pre = document.createElement('pre');
+        pre.style.margin = '0';
+        pre.style.fontFamily = 'monospace';
+        pre.innerText = d.resv_block || 'Static assignment';
+        tdResv.appendChild(pre);
+      }
+      
+      // --- Actions Column gets RELEASE BUTTON ---
+      tdActions.innerHTML = ''; // Clear the '-'
+      const releaseBtn = document.createElement('button');
+      releaseBtn.className = 'btn action-release';
+      releaseBtn.innerText = 'RELEASE';
+      
+      releaseBtn.onclick = async () => {
+          await releaseDevice(d.device_id); 
+          await fetchAndUpdateSingle(d.device_id); 
+      };
+      tdActions.appendChild(releaseBtn);
+    }
   }
-  tdActions.innerHTML = '';
-
-  const leftBlock = document.createElement('div');
-  leftBlock.style.display = 'flex';
-  leftBlock.style.flexDirection = 'row';
-  leftBlock.style.alignItems = 'center';
-  leftBlock.style.gap = '6px';
-
-  if (tag === 'free') {
-    // show inputs: user, hours, minutes, RESERVE button
-    const userInput = document.createElement('input');
-    userInput.className = 'input-user';
-    userInput.placeholder = 'user';
-    userInput.value = d.current_user || '';
-
-    const hoursInput = document.createElement('input');
-    hoursInput.className = 'input-compact';
-    hoursInput.type = 'number';
-    hoursInput.min = 0;
-    hoursInput.value = '1'; // default 1 hr
-    const hoursLabel = document.createElement('span'); hoursLabel.innerText = 'hrs';
-
-    const minsInput = document.createElement('input');
-    minsInput.className = 'input-compact';
-    minsInput.type = 'number';
-    minsInput.min = 0;
-    minsInput.max = 59;
-    minsInput.value = '0';
-    const minsLabel = document.createElement('span'); minsLabel.innerText = 'mins';
-
-    const reserveBtn = document.createElement('button');
-    reserveBtn.className = 'btn small action-reserve';
-    reserveBtn.innerText = 'RESERVE';
-    reserveBtn.onclick = async () => {
-      const user = userInput.value.trim();
-      const hours = parseInt(hoursInput.value || '0', 10) || 0;
-      const minutes = parseInt(minsInput.value || '0', 10) || 0;
-      if (!user) { alert("Enter user"); return; }
-      // set editing flag to prevent overwriting inputs during request
-      tdActions.setAttribute('data-editing', '1');
-      await reserveDevice(d.device_id, user, hours, minutes);
-      tdActions.removeAttribute('data-editing');
-      await fetchAndUpdateSingle(d.device_id);
-    };
-
-    // set editing flag when focused so poll doesn't overwrite them
-    [userInput, hoursInput, minsInput].forEach(inp => {
-      inp.addEventListener('focus', () => tdActions.setAttribute('data-editing', '1'));
-      inp.addEventListener('blur', () => setTimeout(()=>tdActions.removeAttribute('data-editing'), 200));
-    });
-
-    leftBlock.appendChild(userInput);
-    leftBlock.appendChild(hoursInput); leftBlock.appendChild(hoursLabel);
-    leftBlock.appendChild(minsInput); leftBlock.appendChild(minsLabel);
-    leftBlock.appendChild(reserveBtn);
-
-  } else if (tag === 'resv') {
-    // show RELEASE button only
-    const releaseBtn = document.createElement('button');
-    releaseBtn.className = 'btn small action-release';
-    releaseBtn.innerText = 'RELEASE';
-    releaseBtn.onclick = async () => {
-      tdActions.setAttribute('data-editing', '1');
-      await releaseDevice(d.device_id);
-      tdActions.removeAttribute('data-editing');
-      await fetchAndUpdateSingle(d.device_id);
-    };
-    leftBlock.appendChild(releaseBtn);
-  } else if (tag === 'static') {
-    // no action buttons for static; show owner
-    const owner = document.createElement('div');
-    owner.textContent = d.current_user || '-';
-    leftBlock.appendChild(owner);
-  } else {
-    leftBlock.appendChild(document.createTextNode('-'));
-  }
-
-  tdActions.appendChild(leftBlock);
 }
 
-// fetch devices and update rows selectively
-let devicesCache = {}; // device_id -> device object
+let devicesCache = {}; 
 
 async function pollAndUpdate() {
   try {
@@ -340,24 +359,22 @@ async function pollAndUpdate() {
     const saw = new Set();
     for (const d of devices) {
       saw.add(d.device_id);
-      // compare with cache, if changed update row
       const prev = devicesCache[d.device_id];
       if (!prev) {
-        // new row
         createRow(d);
         updateRow(d);
       } else {
-        // shallow compare relevant fields to decide update
-        const fieldsToCheck = ['model_name','hw_id','mgmt_ip','port_id','health','retry_count','tag','current_user','duration','resv_block'];
+        // Check for changes
+        const fields = ['model_name','hw_id','mgmt_ip','port_id','health','tag','current_user','duration','resv_block'];
         let changed = false;
-        for (const f of fieldsToCheck) {
-          if ((prev[f] || '') !== (d[f] || '')) { changed = true; break; }
+        for (const f of fields) {
+          if ((prev[f]||'') !== (d[f]||'')) { changed = true; break; }
         }
         if (changed) updateRow(d);
       }
       devicesCache[d.device_id] = d;
     }
-    // remove deleted rows
+    // Cleanup deleted
     for (const did in devicesCache) {
       if (!saw.has(did)) {
         const tr = document.getElementById(`row-${did}`);
@@ -365,26 +382,18 @@ async function pollAndUpdate() {
         delete devicesCache[did];
       }
     }
-  } catch (e) {
-    console.error("poll/update error", e);
-  }
-}
-
-async function fetchAndUpdateSingle(device_id) {
-  try {
-    const resp = await fetch("/api/devices");
-    const json = await resp.json();
-    const devices = json.devices || [];
-    for (const d of devices) {
-      if (d.device_id === device_id) {
-        devicesCache[device_id] = d;
-        updateRow(d);
-        break;
-      }
-    }
   } catch (e) { console.error(e); }
 }
 
-// initial load
+async function fetchAndUpdateSingle(device_id) {
+    const devices = await fetchDevices();
+    const d = devices.find(x => x.device_id === device_id);
+    if (d) {
+        devicesCache[device_id] = d;
+        updateRow(d);
+    }
+}
+
+// Start
 pollAndUpdate();
 setInterval(pollAndUpdate, POLL_INTERVAL);

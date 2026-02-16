@@ -1,17 +1,16 @@
 # app.py
+import time, datetime
+import os, threading
 import csv
-import threading
-import time
-import datetime
-import os
 import ipaddress
+import socket, subprocess
 from filelock import FileLock
 from flask import Flask, jsonify, request, render_template, send_from_directory
 import paramiko
 import traceback
 
 # -----------------------
-# Global Config (from your spec)
+# Global Config (change accordingly)
 # -----------------------
 PI_IP = "10.25.4.200"
 SSH_USER = "host1"
@@ -83,7 +82,7 @@ def init_device_state_from_csv():
             did = d["device_id"]
             if did not in device_state:
                 device_state[did] = {
-                    "health": "unknown",
+                    "health": "unk",
                     "retry_count": 0,
                     "next_check_ts": time.time() + 1
                 }
@@ -183,7 +182,7 @@ class HealthManager(threading.Thread):
                     to_ping = []
                     for did in check_list_ids:
                         mgmt = mgmt_map.get(did)
-                        # skip devices without a valid mgmt_ip (health stays 'unknown')
+                        # skip devices without a valid mgmt_ip (health stays 'unk')
                         if mgmt and is_valid_ipv4(mgmt):
                             to_ping.append((did, mgmt))
                         else:
@@ -191,7 +190,7 @@ class HealthManager(threading.Thread):
                             with device_state_lock:
                                 st = device_state.get(did)
                                 if st:
-                                    st["health"] = "unknown"
+                                    st["health"] = "unk"
                                     st["retry_count"] = 0
                                     st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
                     self.run_one_cycle(to_ping)
@@ -207,6 +206,55 @@ class HealthManager(threading.Thread):
         self.close_ssh()
 
 health_manager = HealthManager(PI_IP, SSH_USER, SSH_PASSWORD)
+
+# -----------------------
+# To handle auto-release, we need a background thread that periodically 
+# checks the database for expired timestamps and releases them.
+# -----------------------
+class ReservationMonitor(threading.Thread):
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.keep_running = True
+
+    def run(self):
+        while self.keep_running:
+            try:
+                # 1. Read Database
+                devices = read_devices_from_csv()
+                dirty = False
+                now = datetime.datetime.utcnow()
+
+                # 2. Check for expirations
+                for d in devices:
+                    if d.get("tag") == "resv":
+                        end_str = d.get("resv_end_time")
+                        if end_str:
+                            try:
+                                end_dt = datetime.datetime.fromisoformat(end_str)
+                                # Buffer of 1 second to ensure we don't race with the very last second of display
+                                if now >= end_dt:
+                                    print(f" * [Auto-Release] Expired reservation for {d['device_id']}. Releasing...")
+                                    d["tag"] = "free"
+                                    d["current_user"] = ""
+                                    d["duration"] = ""
+                                    d["resv_end_time"] = ""
+                                    dirty = True
+                            except ValueError:
+                                # Handle cases where date format might be corrupted
+                                pass
+                
+                # 3. Save if changes made
+                if dirty:
+                    write_devices_to_csv(devices)
+                
+                # Check every 10 seconds to reduce I/O load
+                time.sleep(10)
+            except Exception:
+                traceback.print_exc()
+                time.sleep(10) # Backoff on error
+
+# Initialize the monitor
+reservation_monitor = ReservationMonitor()
 
 # -----------------------
 # Flask app + API
@@ -251,20 +299,22 @@ def format_reservation_block(d):
                 time_left = f"{th:02d}:{tm:02d}:{ts:02d}"
             else:
                 time_left = "00:00:00"
+            time_format = "%d-%m-%y %I:%M.%p"
             start_dt = end_dt - datetime.timedelta(minutes=dur_min) if dur_min else None
-            start_str = start_dt.strftime("%d-%m-%Y %H:%M") if start_dt else "-"
-            end_str = end_dt.strftime("%d-%m-%Y %H:%M")
+            start_str = start_dt.strftime(time_format) if start_dt else "-"
+            end_str = end_dt.strftime(time_format)
         else:
             time_left = "-"
             start_str = "-"
             end_str = "-"
         # preserve requested format as closely as possible
-        return f"User: {current_user}, Duration: {hh}hrs,{mm}mins, Time Left: {time_left}\nStart: {start_str} End: {end_str}"
+        return f"User: {current_user}, Duration: {hh}hrs,{mm}mins\nStart: {start_str} End: {end_str}\nTime Left: {time_left}"
     elif tag == "static":
         owner = d.get("current_user") or "-"
-        return f"Owner: {owner}"
+        return f"Static Reservation Owner: {owner}"
     else:
         return ""
+
 
 @app.route("/api/devices", methods=["GET"])
 def api_devices():
@@ -277,10 +327,10 @@ def api_devices():
             mgmt = d.get("mgmt_ip") or ""
             # if mgmt missing/invalid => health unknown
             if not mgmt or not is_valid_ipv4(mgmt):
-                health = "unknown"
+                health = "unk"
                 retry_count = 0
             else:
-                st = device_state.get(did, {"health":"unknown","retry_count":0,"next_check_ts":time.time()+1})
+                st = device_state.get(did, {"health":"unk","retry_count":0,"next_check_ts":time.time()+1})
                 health = st["health"]
                 retry_count = st["retry_count"]
             resv_block = format_reservation_block(d)
@@ -291,6 +341,7 @@ def api_devices():
                 "resv_block": resv_block
             })
     return jsonify({"devices": output})
+
 
 @app.route("/api/reserve", methods=["POST"])
 def api_reserve():
@@ -306,14 +357,25 @@ def api_reserve():
     d = find_device(devices, device_id)
     if not d:
         return jsonify({"error": "device not found"}), 404
-    now = datetime.datetime.utcnow()
-    end = now + datetime.timedelta(minutes=duration_minutes)
-    d["current_user"] = user
-    d["duration"] = str(duration_minutes)
-    d["resv_end_time"] = end.isoformat()
-    d["tag"] = "resv"   # set to 'resv' per your requirement
+    
+    # Static Reservation if >= 24 hours
+    if hours >= 24:
+        d["tag"] = "static"
+        d["current_user"] = user
+        d["duration"] = ""        # No duration for static
+        d["resv_end_time"] = ""   # No end time for static
+    else:
+        duration_minutes = hours * 60 + minutes
+        now = datetime.datetime.utcnow()
+        end = now + datetime.timedelta(minutes=duration_minutes)
+        d["tag"] = "resv"
+        d["current_user"] = user
+        d["duration"] = str(duration_minutes)
+        d["resv_end_time"] = end.isoformat()
+
     write_devices_to_csv(devices)
     return jsonify({"ok": True, "resv_end_time": d["resv_end_time"]})
+
 
 @app.route("/api/release", methods=["POST"])
 def api_release():
@@ -332,6 +394,7 @@ def api_release():
     write_devices_to_csv(devices)
     return jsonify({"ok": True})
 
+
 @app.route("/api/refresh_health", methods=["POST"])
 def api_refresh_health():
     body = request.get_json()
@@ -342,7 +405,7 @@ def api_refresh_health():
         st = device_state.get(device_id)
         if not st:
             device_state[device_id] = {
-                "health": "unknown",
+                "health": "unk",
                 "retry_count": 0,
                 "next_check_ts": time.time() + 0.1
             }
@@ -351,21 +414,35 @@ def api_refresh_health():
             st["next_check_ts"] = time.time() + 0.1
     return jsonify({"ok": True})
 
-@app.route("/api/compute_ports", methods=["POST"])
-def api_compute_ports():
+
+@app.route("/api/config", methods=["POST"])
+def api_config():
     data = request.get_json()
     mgmt_ip = data.get("mgmt_ip")
     if not mgmt_ip:
         return jsonify({"error":"mgmt_ip required"}), 400
+    
+    port_id = 0
+    try:
+        port_id = int(data.get("port_id"))
+    except Exception as e:
+        return jsonify({"error":e}), 400
+
+    # Extract last octet (e.g., 192.168.1.55 -> 55)
     last_octet = int(mgmt_ip.strip().split(".")[-1])
+    
+    # Calculate ports based on global config offsets
     av_port = AV_UI["offset"] + last_octet
     old_main_port = MAIN_UI_OLD["offset"] + last_octet
     new_main_port = MAIN_UI["offset"] + last_octet
+
     return jsonify({
         "switch_id": last_octet,
         "av_port": av_port,
+        "new_main_port": new_main_port,
         "old_main_port": old_main_port,
-        "new_main_port": new_main_port
+        "console_ip": CONSOLE_IP,
+        "device_port": PORT_OFFSET + port_id,
     })
 
 @app.route('/static/<path:p>')
@@ -375,7 +452,30 @@ def static_files(p):
 def start_background_services():
     init_device_state_from_csv()
     health_manager.start()
+    reservation_monitor.start()
+
+def kill_process_on_port(port):
+    """Forcefully kills any process running on the specified port (Linux/Unix)."""
+    try:
+        # Find PIDs using the port
+        result = subprocess.check_output(["lsof", "-t", f"-i:{port}"])
+        pids = result.decode().strip().split('\n')
+        for pid in pids:
+            if pid:
+                print(f" * Forcefully clearing port {port} (Killing PID {pid})...")
+                subprocess.run(["kill", "-9", pid])
+    except subprocess.CalledProcessError:
+        # No process was using the port
+        pass
+    except Exception as e:
+        print(f" * Note: Could not auto-kill process on port {port}: {e}")
 
 if __name__ == "__main__":
+    # 1. Kill any existing process on port 5000
+    kill_process_on_port(5000)
+    
+    # 2. Start background services
     start_background_services()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    
+    # 3. Run Flask (use_reloader=False is safer for manual port management)
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)

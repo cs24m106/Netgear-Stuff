@@ -8,6 +8,7 @@ from filelock import FileLock
 from flask import Flask, jsonify, request, render_template, send_from_directory
 import paramiko
 import traceback
+import argparse
 
 # -----------------------
 # Global Config (change accordingly)
@@ -471,6 +472,10 @@ def kill_process_on_port(port):
         print(f" * Note: Could not auto-kill process on port {port}: {e}")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Switch Reservation UI")
+    parser.add_argument("--debug", action="store_true", default=False, help="Enable Flask debug mode")
+    args = parser.parse_args()
+
     # 1. Kill any existing process on port 5000
     kill_process_on_port(5000)
     
@@ -478,4 +483,4 @@ if __name__ == "__main__":
     start_background_services()
     
     # 3. Run Flask (use_reloader=False is safer for manual port management)
-    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
+    app.run(host="0.0.0.0", port=5000, debug=args.debug, use_reloader=False)

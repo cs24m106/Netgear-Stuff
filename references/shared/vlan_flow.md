@@ -162,18 +162,112 @@ return dot1qVlanCreateMask(vidMask);
 
 - `dot1qIssueCmd:`
     - Posts the VLAN mask in a message format to dot1q task.
-    - Event: dot1q_vlan_create_static_maskUses osapiMessageSend for asynchronous processing.
+    - Event: dot1q_vlan_create_static_mask 
+    - Uses osapiMessageSend for asynchronous processing.
+    ```c
+    /*@purpose  Place a command on the dot1q message queue
+    * @param    *msg    pointer to DOT1Q_MSG_t
+    * @returns  L7_SUCCESS or L7_FAILURE                */
+    L7_RC_t dot1qIssueCmd(DOT1Q_MSG_t *msg);
+    ```
+
+```c
+// msg structure
+typedef struct DOT1Q_MSG_s 
+{
+L7_uint32            vlanId;
+L7_uint32            mode; /* data for the event (untagged/tagged or fixed/aut/forbidden)*/
+DOT1Q_SWPORT_MODE_t  swport_mode; /* Access | Trunk | General|None  mode through which the cmd is issued */
+DOT1Q_EVENTS_t    event;
+union 
+{
+    L7_uint32         intIfNum;
+    L7_uchar8         name[L7_MAX_VLAN_NAME];
+    NIM_INTF_MASK_t   intfMask;
+    L7_CNFGR_CMD_DATA_t CmdData;
+    NIM_EVENT_COMPLETE_INFO_t status;
+    dot1q_msg_prio_t  prio;  /* NOTE: When using prio struct, use its intIfNum field*/ 
+                            /*       instead of the one in the 'data' union        */
+    dot1q_msg_intf_vlan_mask_t intfVlanMask;  /* NOTE: When using this struct, use its intIfNum field*/ 
+                                            /*       instead of the one in the 'data' union        */
+    dot1qNimStartup_t nimStartup;
+} data;
+vlanRequestor_t    requestor;
+L7_COMPONENT_IDS_t acquirer;
+/* vlan data*/
+}DOT1Q_MSG_t;
+```
 
 - `dot1qDispatch():` Dot1q event processor.
+    ```c
+    /*@purpose  Process a command received on the dot1q message queue
+    * @param    *msg    pointer to DOT1Q_MSG_t
+    * @returns  L7_SUCCESS or L7_FAILURE                            */
+    L7_RC_t dot1qDispatch(DOT1Q_MSG_t *msg);
+    ```
 
 - `dot1qVlanCreateMaskProcess()`
     - Inside a OSAPI write lock, Loops through VLAN mask and creates entry(vlanEntryAdd) in the VLAN tree.
+    - The function starts by acquiring an OSAPI (Operating System Abstraction Layer API) Write Lock.
+        - Why? The VLAN Database is a shared resource. If one thread is deleting a VLAN while another is creating 100 new ones, the database could become corrupted.
+        - The "Write Lock" ensures mutual exclusion, meaning no other process can read or modify the VLAN tree until this function finishes.
+    ```c
+    /*@purpose  Create a range of vlans
+    * @param    vlanMask     Vlan ID Mask
+    * @returns  L7_SUCCESS, if success or L7_FAILURE, if other/failure
+    * @notes    The vlan mask need not be contiguous                */
+    void dot1qVlanCreateMaskProcess(L7_VLAN_MASK_t *vlanMask);
+    ```
     - Calls `dtlDot1qCreateMask().`
     - Notify registered users with VLAN_ADD_NOTIFY using vlanNotifyRegisteredUsers()
-    - Enable VLAN statistics - dtlEnableVlanStats()
+    - Enable VLAN statistics - `dtlEnableVlanStats()`
+    
 
 ## 5. Device Transformation Layer (DTL):
-- `dtlDot1qCreateMask()`: Calls `dapiCtl()` with **DAPI** command **DAPI_CMD_QVLAN_VLAN_LIST_CREATE**.
+It acts as a critical "middleman" or translation bridge. Its job is to take generic networking concepts from the upper management software (like "Create a VLAN") and transform them into specific, hardware-readable instructions for the underlying chip drivers.
+
+### The Role of DTL in the Architecture
+To understand DTL, you have to look at where it sits in the software stack. It sits between the Application/Protocol Layer (where dot1qVlanCreateMaskProcess lives) and the DAPI (Device API) / SDK Layer.
+
+- Platform Independence: DTL allows the same CLI and Protocol code to run on different types of switch chips. The CLI doesn't need to know if the chip is a "Tomahawk" or a "Trident"; it just tells DTL to create a VLAN, and DTL "transforms" that request for the specific hardware.
+- Abstraction: It hides the complexity of hardware registers.
+
+### Analysis of the DTL Functions
+how the DTL handles a VLAN creation request:
+
+`dtlDot1qCreateMask()`: 
+```c
+/*@purpose  Creates VLANs with no members
+* @param    vlanMask      @b{(input)} VLAN ID Mask
+* @param    numVlans      @b{(input)} Num of vlans set in the mask
+* @param    *vlanMaskFailure @b{(output)} Vlan mask of vlans that were not created
+* @param    *vlanFailureCount @b{(output)} Num of vlan that were not created
+* @returns  L7_SUCCESS  if success or L7_FAILURE  if failure        */
+L7_RC_t dtlDot1qCreateMask(
+    L7_VLAN_MASK_t *vlanMask, L7_uint32 numVlans, 
+    L7_VLAN_MASK_t* vlanMaskFailure, L7_uint32 *vlanFailureCount);
+```
+This is the "Batch Processor." Instead of calling the driver 100 times for 100 VLANs, it passes a VLAN Mask.
+- Calls `dapiCtl()` with **DAPI** command **DAPI_CMD_QVLAN_VLAN_LIST_CREATE**.
+- Transformation: It takes the high-level L7_VLAN_MASK_t and prepares a DAPI Command (DAPI_CMD_QVLAN_VLAN_LIST_CREATE).
+- Error Tracking: Notice the parameters vlanMaskFailure and vlanFailureCount. Because hardware resources (like TCAM or VLAN IDs) are limited, some VLANs might fail to be created while others succeed. DTL tracks exactly which bits in the mask failed so it can report them back to the user.
+
+`dtlEnableVlanStats()`:
+```c
+/*@purpose  Enable driver vlan statistics for this interface
+*
+* @param    intfNum     @b{(input)} Internal interface number
+* @param    vlanID      @b{(input)} vlan id
+* @param    enable      @b{(input)} Enable or Disable
+*
+* @returns  L7_SUCCESS, if statistics are enabled/disabled
+* @returns  L7_NOT_SUPPORTED, if trying to enable/disable per port per VLAN counts
+* @returns  L7_FAILURE, otherwise                           */
+L7_RC_t dtlEnableVlanStats(L7_uint32 intIfNum, L7_uint32 vlanID, L7_BOOL enable);
+```
+Hardware chips have "Counters" (special memory slots that increment when a packet passes). There aren't enough counters for everything, so they must be explicitly enabled.
+- Logic: It maps a logical VLAN ID to a physical counter resource in the chip.
+- Constraints: It returns L7_NOT_SUPPORTED if the user asks for something the hardware physically cannot do (like counting every single packet on every port and every VLAN simultaneously, which is very memory-intensive).
 
 ## 6. DAPI: `dapiCtl()`
 - DAPI's database dapi_g, has a list of port specific function pointers(cmdTable) for each DAPI command.

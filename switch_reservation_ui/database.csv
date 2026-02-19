@@ -1,5 +1,5 @@
 device_id,model_name,hw_id,mgmt_ip,port_id,tag,current_user,duration,resv_end_time
-ng-370,M4250-40G8F-PoE+,GSM4248P V1,,1,free,,,
+ng-370,M4250-40G8F-PoE+,GSM4248P V1,192.168.1.187,1,free,,,
 ng-376,M4250-10G2F-PoE+,GSM4212P V1,192.168.1.132,5,free,,,
 ng-377,M4250-10G2F-PoE+,GSM4212P V1,192.168.1.160,7,free,,,
 ng-369,M4250-40G8XF-PoE++,GSM4248UX V1,192.168.1.125,9,free,,,

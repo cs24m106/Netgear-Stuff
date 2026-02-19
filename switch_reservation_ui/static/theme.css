@@ -1,0 +1,226 @@
+/* =========================================================
+   Switch Management UI - Minimal Bootstrap-Compatible Theme
+   Works with Bootstrap 5.3 data-bs-theme (light/dark)
+   ========================================================= */
+
+/* =========================================================
+   THEME VARIABLES  (CHANGE: Bootstrap theme compatibility)
+   ========================================================= */
+
+:root {
+  --ui-bg: #ffffff;
+  --ui-fg: #212529;
+  --ui-muted: #6c757d;
+  --ui-border: #dee2e6;
+  --ui-card: #ffffff;
+  --ui-hover: #f8f9fa;
+  --ui-success-soft: #e8f6ec;
+  --ui-warning-soft: #fff4e6;
+}
+
+[data-bs-theme="dark"] {
+  --ui-bg: #0f1720;
+  --ui-fg: #e6eef8;
+  --ui-muted: #9aa6b2;
+  --ui-border: #2b3440;
+  --ui-card: #0b1220;
+  --ui-hover: #1a2432;
+  --ui-success-soft: rgba(40, 167, 69, 0.15);
+  --ui-warning-soft: rgba(255, 193, 7, 0.15);
+}
+
+/* =========================================================
+   BASE PAGE
+   ========================================================= */
+
+body {
+  background-color: var(--ui-bg);
+  color: var(--ui-fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  padding: 1rem;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+h1, .h4 {
+  color: var(--ui-fg);
+  font-weight: 600;
+}
+
+/* =========================================================
+   TABLE STYLING
+   ========================================================= */
+
+table.table {
+  border-color: var(--ui-border);
+  background: transparent;
+}
+
+table.table th,
+table.table td {
+  vertical-align: middle;
+  border-color: var(--ui-border);
+}
+
+table.table tbody tr:hover {
+  background-color: var(--ui-hover);
+  transition: background-color 0.15s ease;
+}
+
+/* Word wrapping for long text */
+.word-wrap {
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* Column alignment helpers */
+.col-left { text-align: left; }
+.col-center { text-align: center; }
+
+/* =========================================================
+   RESERVATION LAYOUT
+   ========================================================= */
+
+.resv-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Responsive stacking */
+@media (max-width: 768px) {
+  .resv-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+}
+
+/* =========================================================
+   INPUTS
+   ========================================================= */
+
+.input-compact {
+  width: 60px;
+  padding: 4px;
+  border-radius: 4px;
+  border: 1px solid var(--ui-border);
+  background: transparent;
+  color: var(--ui-fg);
+  font-size: 0.85rem;
+}
+
+.input-user {
+  width: 100%;
+  padding: 6px;
+  border-radius: 4px;
+  border: 1px solid var(--ui-border);
+  background: transparent;
+  color: var(--ui-fg);
+  font-size: 0.9rem;
+}
+
+/* =========================================================
+   ACTION BUTTONS
+   (JS adds Bootstrap .btn classes — these are soft fallbacks)
+   ========================================================= */
+
+.action-btn {
+  margin-right: 4px;
+}
+
+/* Reserve (soft green fallback if Bootstrap not applied) */
+.action-reserve {
+  background: var(--ui-success-soft);
+  color: #0b6623;
+  border: 1px solid #8fd19a;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.action-reserve:hover {
+  opacity: 0.85;
+}
+
+/* Release (soft amber fallback) */
+.action-release {
+  background: var(--ui-warning-soft);
+  color: #b45f04;
+  border: 1px solid #e6c79a;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.action-release:hover {
+  opacity: 0.85;
+}
+
+/* Refresh health */
+.action-refresh {
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-fg);
+  border-radius: 4px;
+  padding: 4px 8px;
+  transition: all 0.15s ease;
+}
+
+.action-refresh:hover {
+  background: var(--ui-hover);
+}
+
+/* Config */
+.action-config {
+  background: transparent;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-fg);
+  border-radius: 4px;
+  padding: 4px 8px;
+  transition: all 0.15s ease;
+}
+
+.action-config:hover {
+  background: var(--ui-hover);
+}
+
+/* =========================================================
+   HEALTH STATUS VISUAL CUES (Optional enhancement)
+   ========================================================= */
+
+.health-up {
+  color: #198754; /* Bootstrap success */
+  font-weight: 600;
+}
+
+.health-down {
+  color: #dc3545; /* Bootstrap danger */
+  font-weight: 600;
+}
+
+.health-unk {
+  color: var(--ui-muted);
+  font-style: italic;
+}
+
+/* =========================================================
+   SMALL UX IMPROVEMENTS
+   ========================================================= */
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+button {
+  transition: all 0.15s ease;
+}
+
+/* Smooth transitions when switching light/dark */
+* {
+  transition: background-color 0.25s ease,
+              color 0.25s ease,
+              border-color 0.25s ease;
+}

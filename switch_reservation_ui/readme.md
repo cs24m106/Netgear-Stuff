@@ -60,13 +60,13 @@ from a database.csv with column field names:
     - colorize and highlight different values of `Status`, `Health`, `Actions` btns
 
 
-Checking & Updating Health status:
+#### Checking & Updating Health status:
 - if current health status is not known or down: 
     - recheck response every `down_health_timer` for `max_health_check_retries`
     - if refresh btn is clicked, the retry counter is resetted and app should start pinging device through below cmd till max retries again.
 - else recheck response every `up_health_timer`
 - use the below cmds to check ping response to the device
-```
+```sh
 >>> Part-1:
     $ ssh {user}@{pi_ip}
 >> continue connecting (yes/no) --> input yes if asked
@@ -78,6 +78,64 @@ Checking & Updating Health status:
 ```
 - NOTE: Part-1 is common for health checkup for all the devices as they are accessable only via console, thus instead of repeating part-1 multiple times, u have to do part-1 once and sequentially do part-2 for all devices sequentially for all devices that are doing at regular intervals, like devices with health status `up` have to synchronously doing health checks at the given intervals.
 
+#### Health Manager
+i want to modify the Health Manager and Reservation Manager in this Flask server python code.
+- `if health is up`: refresh btn can just try pinging once or just ignore call, as it will be updated soon every up_health timer
+- `if health is down`: refresh btn resets retry count as usual, that internally will trigger heath check up every down_health timer for max_retries count
+- `if health is unk`: refresh btn cmd (runs on **singleton** ssh_client conn already open) =>
+```sh
+    $ telnet {console_ip} {PORT_OFFSET + port_id (of resp entry)}
+>> press enter
+>> if prompted for "User:", enter "admin"
+>> if prompted for "Password:", enter "Switch@123"
+>> if you see "(**string**)>" means u have logged into switch 
+>> (if not, u can skip the below process by directly quitting telnet connection 
+    incase it didnt disconnect on its own, new unconfigured switch\'s user & password might not match)
+    $ (switch)> show serviceport
+
+Interface Status............................... Up
+IP Address..................................... 192.168.1.187
+Subnet Mask.................................... 255.255.255.0
+Default Gateway................................ 192.168.1.1
+IPv6 Administrative Mode....................... Enabled
+IPv6 Prefix is ................................ fe80::2a94:1ff:fe7b:7d49/64
+Configured IPv4 Protocol....................... DHCP
+Configured IPv6 Protocol....................... None
+IPv6 AutoConfig Mode........................... Disabled
+Burned In MAC Address.......................... 28:94:01:7B:7D:49
+
+>> you should get output like above --> update the mgmt_ip from above if Interface Status is up
+>> close the telnet connection to switch via `ctrl+]` or Escape character `^]` and
+    $ telnet> quit
+>> now perform the ping operation like before to check periodically and update health status
+```
+
+#### Reservation Manager
+similarly, whenever a reservation entry is changed, i want to update switch name to the assigned user by similar flow of cmds onto signleton ssh_client already opened...<br>
+**Part-1:**
+```sh
+    $ telnet {console_ip} {PORT_OFFSET + port_id (of resp entry)}
+>> Handle User: admin, Password: Switch@123 prompts
+>> Note some switch might not have user/password, it will directly hop into switch cli
+    $ (switch_name)> en
+>> enables config mode '>' will be changed to `#`
+```
+**Part-2:**<br>
+- `if 'reserve' btn is pressed:`
+    ```sh
+        $ (switch_name)# hostname {current_user.trim_whitespaces}
+    >>  `(username)#` updation on switch cli means hostname changed successfully
+    ```
+- `if 'release' btn is pressed or any dynamic reservation gets released by manager with time alloted gets over:`
+    ```sh
+        $ (username)# hostname {model_name.trim_whitespaces}
+    >>  `(switch_name)#` updation on switch cli means hostname changed successfully
+    ```
+- finally quit telnet connection 
+    ```
+    via `ctrl+]` or Escape character `^]` and
+    $ telnet> quit
+    ```
 
 ## Manual Acesss Info:
 - cmd: ssh host1@10.25.4.200

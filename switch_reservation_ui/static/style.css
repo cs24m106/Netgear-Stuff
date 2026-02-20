@@ -87,7 +87,8 @@ tr:nth-child(even){ background-color: #f9f9f9; }
 /* --- Health Colors --- */
 .health-up { color: #0b6623; font-weight: bold; }
 .health-down { color: #c62828; font-weight: bold; }
-.health-unk { color: #6c757d; font-weight: bold; }
+.health-busy { color: #283ac6; font-weight: bold; }
+.health-unk { color: #5c4b60; font-weight: bold; }
 
 /* --- Inputs within Reservation Column --- */
 .resv-inputs {

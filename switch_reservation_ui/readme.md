@@ -43,6 +43,7 @@ from a database.csv with column field names:
     f"User: {curent_user}, Duration: {duration}.format{(hh)hrs,(mm)mins}, Time Left: {resv_end_time - current_time}.format(hh:mm:ss} \n\
     Start: {resv_end_time - duration}.format(dd-mm-yy hh:mm) End: {end_time_stamp}.format(dd-mm-yy hh:mm)" 
     ```
+    - for now input time >= 24hrs --> becomes static reservation, need to be manually released.
     - `if tag == static:` 
     display current user name as owner, no need for any other info
     - `if tag == free:` allow users to enter new resv entry:
@@ -120,6 +121,15 @@ similarly, whenever a reservation entry is changed, i want to update switch name
     $ (switch_name)> en
 >> enables config mode '>' will be changed to `#`
 ```
+instead of setting hostname via telnet connect, i want to connect via ssh. As telnet allows only one connection at a time where if user is using it, it wont allow another connection to enter. Whereas ssh allow indefinite amount of connections, thus most likely will not blocked out
+```sh
+    $ ssh switch_user@{mgmt_ip}
+>> Handle password: switch_password prompt
+>> Note some switch might not have user/password, it will directly hop into switch cli
+    $ (switch_name)> en
+>> enables config mode '>' will be changed to `#`
+```
+
 **Part-2:**<br>
 - `if 'reserve' btn is pressed:`
     ```sh
@@ -131,11 +141,17 @@ similarly, whenever a reservation entry is changed, i want to update switch name
         $ (username)# hostname {model_name.trim_whitespaces}
     >>  `(switch_name)#` updation on switch cli means hostname changed successfully
     ```
-- finally quit telnet connection 
-    ```
-    via `ctrl+]` or Escape character `^]` and
-    $ telnet> quit
-    ```
+- finally quit:
+    - telnet connection 
+        ```sh
+        via `ctrl+]` or Escape character `^]` and
+        $ telnet> quit
+        ```
+    - ssh connection
+        ```sh
+        >> enter cmd 'logout', as exit cmd is overritten by switch\'s internal cli cmds
+        >> promts back with logoutConnection to {ip} closed
+        ```
 
 ## Manual Acesss Info:
 - cmd: ssh host1@10.25.4.200

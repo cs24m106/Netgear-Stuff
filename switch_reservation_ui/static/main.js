@@ -7,7 +7,7 @@ async function fetchDevices() {
 }
 
 async function updateConfigs(mgmt_ip, port_id) {
-  if (!mgmt_ip || mgmt_ip === '-') return null;
+  if (!mgmt_ip || mgmt_ip === '—.—.—.—') return null;
 
   try {
     const response = await fetch("/api/config", {
@@ -59,6 +59,14 @@ async function releaseDevice(device_id) {
     method:"POST",
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({device_id})
+  }).then(r => r.json());
+}
+
+async function removeIP(device_id) {
+  return fetch("/api/remove_mgmt_ip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({device_id})
   }).then(r => r.json());
 }
 
@@ -136,16 +144,35 @@ function updateRow(d) {
   mgmtContainer.className = 'cell-flex';
   
   const mgmtText = document.createElement('span');
-  mgmtText.textContent = d.mgmt_ip || '-';
+  mgmtText.textContent = d.mgmt_ip || '—.—.—.—';
   mgmtContainer.appendChild(mgmtText);
 
   if (d.mgmt_ip) {
-      const copyBtn = document.createElement('button');
-      copyBtn.className = 'btn icon-only';
-      copyBtn.title = `ssh admin@${d.mgmt_ip}`;
-      copyBtn.innerText = '⧉';
-      copyBtn.onclick = () => copyToClipboard(copyBtn.title);
-      mgmtContainer.appendChild(copyBtn);
+    // copy btn
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'btn icon-only';
+    copyBtn.title = `ssh admin@${d.mgmt_ip}`;
+    copyBtn.innerText = '⧉';
+    copyBtn.onclick = () => copyToClipboard(copyBtn.title);
+
+    // remove btn
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'btn icon-only';
+    removeBtn.title = 'Remove Mgmt-IP';
+    removeBtn.innerText = '✖';
+    removeBtn.onclick = async () => {
+      const r = await removeIP(d.device_id)
+      if (r.ok) {
+        alert("Mgmt-IP removed. Use Health-Refresh btn to fetch new mgmt ip via console");
+        await fetchAndUpdateSingle(d.device_id);
+      } else {
+        alert("Failed to remove Mgmt-IP: " + (r.error || "Unknown error"));
+      }
+    };
+
+    // arrange btns -> order: remove, copy
+    mgmtContainer.appendChild(removeBtn);
+    mgmtContainer.appendChild(copyBtn);
   }
   tdMgmt.appendChild(mgmtContainer);
 
@@ -168,7 +195,7 @@ function updateRow(d) {
       `;
       tdUi.appendChild(container);
     } else {
-      tdUi.textContent = "—";
+      tdUi.textContent = "——\n——\n——";
     }
 
     const consContainer = document.createElement('div');
@@ -178,7 +205,7 @@ function updateRow(d) {
     consText.textContent = (Number.isNaN(portVal) ? '-' : portVal);
     consContainer.appendChild(consText);
 
-    if (!Number.isNaN(portVal)) {
+    if (!Number.isNaN(portVal) && config) {
       const copyBtn = document.createElement('button');
       copyBtn.className = 'btn icon-only';
       copyBtn.title = `telnet ${config.console_ip} ${config.device_port}`;
@@ -202,6 +229,7 @@ function updateRow(d) {
   healthSpan.innerText = health; 
   if (health === 'up') healthSpan.className = 'health-up';
   else if (health === 'down') healthSpan.className = 'health-down';
+  else if (health === 'busy') healthSpan.className = 'health-busy';
   else healthSpan.className = 'health-unk';
   
   healthContainer.appendChild(healthSpan);
@@ -211,9 +239,21 @@ function updateRow(d) {
   refreshBtn.title = 'Refresh';
   refreshBtn.innerText = '↻';
   refreshBtn.onclick = async () => {
-    await fetch("/api/refresh_health", {method:"POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({device_id:d.device_id})});
-    healthSpan.innerText = '...';
-  };
+  healthSpan.innerText = '...';
+  const r = await fetch("/api/refresh_health", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ device_id: d.device_id })
+  });
+  const j = await r.json();
+  if (j.ok) {
+    healthSpan.innerText = j.status;
+    if (j.status === 'up') healthSpan.className = 'health-up';
+    else if (j.status === 'down') healthSpan.className = 'health-down';
+    else if (j.status === 'busy') healthSpan.className = 'health-busy';
+    else healthSpan.className = 'health-unk';
+  }
+};
   healthContainer.appendChild(refreshBtn);
   tdHealth.appendChild(healthContainer);
 
@@ -312,9 +352,14 @@ function updateRow(d) {
             if (!user) { alert("Please enter a user name"); return; }
             
             tdResv.setAttribute('data-editing', '1'); // Lock during request
-            await reserveDevice(d.device_id, user, hrs, mins);
+            const r = await reserveDevice(d.device_id, user, hrs, mins);
             tdResv.removeAttribute('data-editing');
             await fetchAndUpdateSingle(d.device_id);
+            if ('ok' in r) {
+              alert(`reserve-hostname changed ? ${r.ok}`);
+            } else {
+              alert(`reserve-hostname change Error : ${r.error}`);
+            }
         };
         tdActions.appendChild(reserveBtn);
 
@@ -343,8 +388,13 @@ function updateRow(d) {
       releaseBtn.innerText = 'RELEASE';
       
       releaseBtn.onclick = async () => {
-          await releaseDevice(d.device_id); 
+          const r = await releaseDevice(d.device_id);
           await fetchAndUpdateSingle(d.device_id); 
+          if ('ok' in r) {
+            alert(`release-hostname changed ? ${r.ok}`);
+          } else {
+            alert(`release-hostname change Error : ${r.error}`);
+          }
       };
       tdActions.appendChild(releaseBtn);
     }

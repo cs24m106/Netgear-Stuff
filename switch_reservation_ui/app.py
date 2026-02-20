@@ -195,7 +195,7 @@ class HealthManager(threading.Thread):
                                     st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
                     self.run_one_cycle(to_ping)
                 else:
-                    time.sleep(0.7)
+                    time.sleep(0.5) # sleep half sec when check list is empty
             except Exception:
                 traceback.print_exc()
                 self.close_ssh()
@@ -210,7 +210,7 @@ health_manager = HealthManager(PI_IP, SSH_USER, SSH_PASSWORD)
 # -----------------------
 # Telnet helpers (interact with console via singleton SSH client shell)
 # -----------------------
-def _read_channel_until(channel, timeout_sec=3, stop_patterns=None):
+def _read_channel_until(channel, timeout_sec=1, stop_patterns=None):
     """
     Read from an invoke_shell channel until timeout or until any of stop_patterns
     (list of bytes or decoded strings) are seen. Returns the accumulated decoded text.
@@ -238,7 +238,7 @@ def _read_channel_until(channel, timeout_sec=3, stop_patterns=None):
                         if pat in s:
                             return s
             else:
-                time.sleep(0.12)
+                time.sleep(0.01)
     except Exception:
         pass
     return buf.decode(errors="ignore")
@@ -252,203 +252,303 @@ def telnet_and_run_show_serviceport(ssh_client, device_port, login_user=SWITCH_U
     On failure returns None.
     """
     try:
+        if app.debug:
+            print(f"[DEBUG] telnet_and_run_show_serviceport: console_ip={CONSOLE_IP}, device_port={device_port}")
+
+        if not device_port:
+            if app.debug:
+                print("[DEBUG] device_port is empty, aborting telnet attempt.")
+            return False
         chan = ssh_client.invoke_shell()
-        time.sleep(0.2)
+        time.sleep(0.1)
+        if app.debug:
+            print("[DEBUG] Starting telnet session...")
         # Start telnet
         chan.send(f"telnet {CONSOLE_IP} {device_port}\n")
         # initial small read
-        out = _read_channel_until(chan, timeout_sec=2)
+        out = _read_channel_until(chan, timeout_sec=1)
+        if app.debug:
+            print(f"[DEBUG] After telnet command:\n{out!r}")
         # press enter (sometimes telnet waits)
-        chan.send("\n")
-        out += _read_channel_until(chan, timeout_sec=2)
+        chan.send("\n\n")
+        out += _read_channel_until(chan, timeout_sec=.5)
+        if app.debug:
+            print(f"[DEBUG] After sending 2-newlines:\n{out!r}")
 
         # handle login prompts (a couple iterations, some devices won't prompt)
         if re.search(r"User[: ]*$", out, re.IGNORECASE):
+            if app.debug:
+                print("[DEBUG] User prompt detected, sending login_user")
             chan.send(login_user + "\n")
-            out += _read_channel_until(chan, timeout_sec=2)
+            out += _read_channel_until(chan, timeout_sec=1)
+            if app.debug:
+                print(f"[DEBUG] After sending login_user:\n{out!r}")
         if re.search(r"Password[: ]*$", out, re.IGNORECASE):
+            if app.debug:
+                print("[DEBUG] Password prompt detected, sending login_pass")
             chan.send(login_pass + "\n")
-            out += _read_channel_until(chan, timeout_sec=3)
+            out += _read_channel_until(chan, timeout_sec=1)
+            if app.debug:
+                print(f"[DEBUG] After sending login_pass:\n{out!r}")
 
         # Now look for a CLI prompt '>' or '#'
         # Give it a few seconds to settle
-        out += _read_channel_until(chan, timeout_sec=2)
+        out += _read_channel_until(chan, timeout_sec=.5)
+        if app.debug:
+            print(f"[DEBUG] After waiting for CLI prompt:\n{out!r}")
 
+        int_status = None
         # If we did not get a prompt yet, try sending a newline to elicit it
         if not re.search(r"[>#]\s*$", out):
+            int_status = "busy"
+            # handle errors after telnet connection
+            if re.search(r"hunt group busy", out, re.IGNORECASE) or re.search(r"Connection refused", out, re.IGNORECASE):
+                if app.debug:
+                    print("[DEBUG] Detected 'hunt group busy' after telnet connection.")
+                try:
+                    chan.close()
+                except Exception:
+                    if app.debug:
+                        print("[DEBUG] Exception during channel close after busy detection.")
+                    pass
+                return {"interface_status": int_status, "ip": None, "raw": out}
+            
+            if re.search(r"Connected", out, re.IGNORECASE) and app.debug:
+                print("[DEBUG] Detected Connection Success, sending newline")
             chan.send("\n")
-            out += _read_channel_until(chan, timeout_sec=2)
+            out += _read_channel_until(chan, timeout_sec=.5)
+            if app.debug:
+                print(f"[DEBUG] After second newline:\n{out!r}")
 
         # If we get a prompt, send the show command
         if re.search(r"[>#]\s*$", out):
+            if app.debug:
+                print("[DEBUG] CLI prompt detected, sending 'show serviceport'")
             chan.send("show serviceport\n")
             # read the command output for a few seconds
-            svc_out = _read_channel_until(chan, timeout_sec=4)
-            raw = out + svc_out
+            out += _read_channel_until(chan, timeout_sec=1)
+            if app.debug:
+                print(f"[DEBUG] Output after 'show serviceport':\n{out!r}")
             # Parse Interface Status and IP Address
-            int_status = None
             ip_addr = None
             # Try to find lines like: "Interface Status............................... Up"
-            m = re.search(r"Interface Status[\s\.\-:]*\s*(Up|Down|up|down)", raw, re.IGNORECASE)
+            m = re.search(r"Interface Status[\s\.\-:]*\s*(Up|Down|up|down)", out, re.IGNORECASE)
             if m:
                 int_status = m.group(1).strip().lower()
+                if app.debug:
+                    print(f"[DEBUG] Parsed Interface Status: {int_status}")
             # Try to find "IP Address........ 192.168.1.187"
-            m2 = re.search(r"IP Address[\s\.\-:]*\s*([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", raw)
+            m2 = re.search(r"IP Address[\s\.\-:]*\s*([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)", out)
             if m2:
                 ip_addr = m2.group(1).strip()
+                if app.debug:
+                    print(f"[DEBUG] Parsed IP Address: {ip_addr}")
             # close telnet gracefully
             try:
+                if app.debug:
+                    print("[DEBUG] Closing telnet session gracefully...")
                 # send escape (ctrl+]) then quit
                 chan.send("\x1d")
                 chan.send("quit\n")
-                _read_channel_until(chan, timeout_sec=1)
+                _read_channel_until(chan, timeout_sec=.5)
             except Exception:
+                if app.debug:
+                    print("[DEBUG] Exception during telnet close.")
                 pass
             try:
                 chan.close()
             except Exception:
+                if app.debug:
+                    print("[DEBUG] Exception during channel close.")
                 pass
 
-            return {"interface_status": int_status, "ip": ip_addr, "raw": raw}
+            if app.debug:
+                print(f"[DEBUG] Final log after conn-termination:\n{out!r}")
+            return {"interface_status": int_status, "ip": ip_addr, "raw": out}
         else:
             # Couldn't reach a prompt; try to quit and return None
+            if app.debug:
+                print("[DEBUG] Could not reach CLI prompt, attempting to quit telnet session.")
             try:
                 chan.send("\x1d")
                 chan.send("quit\n")
             except Exception:
+                if app.debug:
+                    print("[DEBUG] Exception during telnet quit.")
                 pass
             try:
                 chan.close()
             except Exception:
+                if app.debug:
+                    print("[DEBUG] Exception during channel close.")
                 pass
+            
+            if app.debug:
+                print(f"[DEBUG] Final log after conn-termination:\n{out!r}")
             return None
     except Exception:
         traceback.print_exc()
+        if app.debug:
+            print("[DEBUG] Exception in telnet_and_run_show_serviceport.")
         return None
 
-def telnet_and_set_hostname(ssh_client, device_port, new_hostname, login_user=SWITCH_USER, login_pass=SWITCH_PASSWORD):
+# CHANGE: replace telnet-based hostname setter with nested SSH over the PI (uses existing ssh_client.invoke_shell())
+def ssh_and_set_hostname_over_pi(ssh_client, mgmt_ip, new_hostname, login_user=SWITCH_USER, login_pass=SWITCH_PASSWORD):
     """
-    Telnet into console and issue 'en' then 'hostname <new_hostname>'.
-    Returns True on evidence of hostname change (prompt contains new_hostname#), False otherwise.
+    Use the existing ssh_client (connected to the PI/console) and from that shell run:
+        ssh {login_user}@{mgmt_ip}
+    Then perform:
+        en
+        hostname {new_hostname}
+        logout
+
+    Returns True if the hostname change is detected (prompt contains new_hostname# or (new_hostname)#), False otherwise.
     """
     try:
         if app.debug:
-            print(f"[DEBUG] telnet_and_set_hostname: device_port={device_port}, new_hostname={new_hostname}")
-        chan = ssh_client.invoke_shell()
-        chan.send(f"telnet {CONSOLE_IP} {device_port}\n")
-        out = _read_channel_until(chan, timeout_sec=2)
-        # Check for "Connection closed" pattern
-        if re.search(r"Connection closed", out, re.IGNORECASE):
+            print(f"[DEBUG] ssh_and_set_hostname_over_pi: mgmt_ip={mgmt_ip}, new_hostname={new_hostname}")
+
+        if not mgmt_ip:
             if app.debug:
-                print("[DEBUG] Telnet failure: Connection closed detected.")
+                print("[DEBUG] mgmt_ip is empty, aborting ssh attempt.")
+            return False
+
+        chan = ssh_client.invoke_shell()
+        time.sleep(0.1)
+
+        # Start nested ssh
+        chan.send(f"ssh {login_user}@{mgmt_ip}\n")
+        out = _read_channel_until(chan, timeout_sec=1)
+
+        # Handle first-time hostkey prompt: "Are you sure you want to continue connecting (yes/no)?"
+        if re.search(r"are you sure you want to continue connecting \(yes/no\)\s*$", out, re.IGNORECASE | re.MULTILINE):
+            if app.debug:
+                print("[DEBUG] Hostkey prompt detected, sending 'yes'")
+            chan.send("yes\n")
+            out += _read_channel_until(chan, timeout_sec=.5)
+
+        # Handle password prompt if present
+        if re.search(r"password[: ]*$", out, re.IGNORECASE | re.MULTILINE):
+            if app.debug:
+                print("[DEBUG] Password prompt detected, sending password")
+            chan.send(login_pass + "\n")
+            out += _read_channel_until(chan, timeout_sec=1)
+
+        # Quick read to settle into remote CLI
+        out += _read_channel_until(chan, timeout_sec=.5)
+        if app.debug:
+            print(f"[DEBUG] After SSH login attempt -> channel output:\n{out!r}")
+
+        # Detect common failure messages
+        if re.search(r"permission denied", out, re.IGNORECASE):
+            if app.debug:
+                print("[DEBUG] SSH permission denied.")
+            try:
+                chan.send("exit\n")
+            except Exception:
+                pass
             try:
                 chan.close()
-            except Exception as e:
-                if app.debug:
-                    print(f"[DEBUG] Exception during channel close: {e}")
+            except Exception:
+                pass
             return False
-        if app.debug:
-            print(f"[DEBUG] Telnet connect successfull! channel: \n{out!r}")
-        chan.send("\n\n")
-        out += _read_channel_until(chan, timeout_sec=2)
-        if app.debug:
-            print(f"[DEBUG] Waiting for Auth, Channel after sending 2-newlines: \n{out!r}")
+        if re.search(r"connection closed", out, re.IGNORECASE) or re.search(r"connection refused", out, re.IGNORECASE):
+            if app.debug:
+                print("[DEBUG] SSH connection failed/closed.")
+            try:
+                chan.close()
+            except Exception:
+                pass
+            return False
 
-        if re.search(r"User[: ]*$", out, re.IGNORECASE):
-            if app.debug:
-                print("[DEBUG] 'User:' token found, Sending switch_user...")
-            chan.send(login_user + "\n")
-            out += _read_channel_until(chan, timeout_sec=2)
-            if app.debug:
-                print(f"[DEBUG] Channel after sending user: \n{out!r}")
-        if re.search(r"Password[: ]*$", out, re.IGNORECASE):
-            if app.debug:
-                print("[DEBUG] 'Password:' token found, Sending switch_password...")
-            chan.send(login_pass + "\n")
-            out += _read_channel_until(chan, timeout_sec=3)
-            if app.debug:
-                print(f"[DEBUG] Channel after sending password: \n{out!r}")
-
-        out += _read_channel_until(chan, timeout_sec=2)
-        if app.debug:
-            print(f"[DEBUG] Check switch-login attempt successfull? \n{out!r}")
+        # Ensure we have a switch CLI prompt (ending with '>' or '#')
         if not re.search(r"[>#]\s*$", out):
-            if app.debug:
-                print("[DEBUG] '>#' sym not found, sending newline...")
+            # try nudging with newline
             chan.send("\n")
-            out += _read_channel_until(chan, timeout_sec=2)
+            out += _read_channel_until(chan, timeout_sec=1)
             if app.debug:
-                print(f"[DEBUG] Check channel once more after newline: \n{out!r}")
+                print(f"[DEBUG] After newline to elicit prompt:\n{out!r}")
 
-        # If we reach prompt, try 'en' to get to config mode (#)
+        # If we see a CLI prompt, proceed
         if re.search(r"[>#]\s*$", out):
             if app.debug:
-                print("[DEBUG] Switch login successfull! enabling config-mode...")
+                print("[DEBUG] Remote CLI prompt found. Entering enable (en) and setting hostname.")
+            # Enter enable mode
             chan.send("en\n")
-            out += _read_channel_until(chan, timeout_sec=2)
+            out += _read_channel_until(chan, timeout_sec=1)
             if app.debug:
-                print(f"[DEBUG] Channel after enabling config-mode: \n{out!r}")
-            # After en, prompt should be '#'
-            if app.debug:
-                print(f"[DEBUG] Sending hostname command: hostname {new_hostname}...")
+                print(f"[DEBUG] After 'en':\n{out!r}")
+
+            # Send hostname command
             chan.send(f"hostname {new_hostname}\n")
-            out += _read_channel_until(chan, timeout_sec=2)
+            out += _read_channel_until(chan, timeout_sec=1)
             if app.debug:
-                print(f"[DEBUG] Channel after setting hostname cmd: \n{out!r}")
-            # After hostname change, prompt often changes to "(<new_hostname>)#"
-            # Give it a moment and read
-            out += _read_channel_until(chan, timeout_sec=2)
+                print(f"[DEBUG] After 'hostname' cmd:\n{out!r}")
+
+            # Allow a short moment for prompt to change
+            out += _read_channel_until(chan, timeout_sec=.5)
             if app.debug:
-                print(f"[DEBUG] Channel waiting for cmd change: \n{out!r}")
-            # Match prompt like: (<new_hostname>)#
-            prompt_ok = re.search(rf"\({re.escape(new_hostname)}\)#\s*$", out)
+                print(f"[DEBUG] After waiting for prompt change:\n{out!r}")
+
+            # Detect prompt like: (<new_hostname>)#  OR  (<new_hostname>)#
+            prompt_patterns = [rf"\(\s*{re.escape(new_hostname)}\s*\)#\s*$", rf"\(\s*{re.escape(new_hostname)}\s*\)>\s*$"]
+            prompt_ok = any(re.search(pat, out, re.MULTILINE) for pat in prompt_patterns)
             if app.debug:
-                print(f"[DEBUG] Hostname changed status: prompt_ok={prompt_ok is not None}")
-            # Close telnet
+                print(f"[DEBUG] Prompt detection patterns matched: {prompt_ok}")
+
+            # Attempt to logout gracefully (switches commonly use 'logout' rather than 'exit')
             try:
-                chan.send("\x1d")
-                chan.send("quit\n")
+                chan.send("logout\n")
                 out += _read_channel_until(chan, timeout_sec=1)
-                confirmation_pattern = re.compile(r"\([yY]/[nN]\)\s*$|\[[yY]/[nN]\]\s*$", re.MULTILINE)
-                if confirmation_pattern.search(out):
-                    if app.debug:
-                        print("[DEBUG] Confirmation prompt detected, sending 'y'")
+                if app.debug:
+                    print(f"[DEBUG] After sending logout:\n{out!r}")
+                # Confirm logout closure
+                out += _read_channel_until(chan, timeout_sec=.5)
+            except Exception as e:
+                if app.debug:
+                    print(f"[DEBUG] Exception while sending logout: {e}")
+
+            # If remote side asks for any confirmation like [y/n], answer 'y' (best-effort)
+            if re.search(r"\[?[yY]/[nN]\]?\s*$", out, re.MULTILINE):
+                if app.debug:
+                    print("[DEBUG] Confirmation prompt detected after logout, sending 'y'")
+                try:
                     chan.send("y\n")
-                print(f"[DEBUG] Telnet closed successfully verify channel: \n{out!r}")
-            except Exception as e:
-                if app.debug:
-                    print(f"[DEBUG] Exception during telnet close: {e}")
-                pass
+                    out += _read_channel_until(chan, timeout_sec=.5)
+                except Exception:
+                    pass
+
+            # Close channel and return result
             try:
                 chan.close()
-                if app.debug:
-                    print("[DEBUG] Channel close successfull!")
-            except Exception as e:
-                if app.debug:
-                    print(f"[DEBUG] Exception during channel close: {e}")
+            except Exception:
                 pass
+
             return bool(prompt_ok)
+
         else:
+            # Didn't reach remote CLI prompt -> try to clean up
             if app.debug:
-                print("[DEBUG] Switch login Failure! disconnecting telnet...")
+                print("[DEBUG] No remote CLI prompt after SSH attempt; cleaning up.")
             try:
-                chan.send("\x1d")
-                chan.send("quit\n")
-            except Exception as e:
-                if app.debug:
-                    print(f"[DEBUG] Exception during telnet close: {e}")
+                chan.send("logout\n")
+                out += _read_channel_until(chan, timeout_sec=.5)
+            except Exception:
                 pass
             try:
                 chan.close()
-            except Exception as e:
-                if app.debug:
-                    print(f"[DEBUG] Exception during channel close: {e}")
+            except Exception:
                 pass
             return False
+
     except Exception as e:
         if app.debug:
-            print(f"[DEBUG] Exception in telnet_and_set_hostname: {e}")
+            print(f"[DEBUG] Exception in ssh_and_set_hostname_over_pi: {e}")
             traceback.print_exc()
+        try:
+            chan.close()
+        except Exception:
+            pass
         return False
 
 # -----------------------
@@ -480,6 +580,7 @@ class ReservationMonitor(threading.Thread):
 
                                     # Capture model_name & port_id before clearing fields
                                     model_name = (d.get("model_name") or "").strip()
+                                    mgmt = d.get("mgmt_ip") or ""
                                     try:
                                         port_id = int(d.get("port_id", 0))
                                     except Exception:
@@ -494,12 +595,12 @@ class ReservationMonitor(threading.Thread):
 
                                     # Best-effort: restore hostname on physical switch back to model_name
                                     # Use the singleton SSH client guarded by health_manager.ssh_lock
-                                    if port_id and model_name:
+                                    if port_id and model_name and mgmt:
                                         try:
                                             if health_manager.ensure_ssh():
                                                 with health_manager.ssh_lock:
                                                     try:
-                                                        ok = telnet_and_set_hostname(health_manager.ssh_client, PORT_OFFSET + port_id, model_name)
+                                                        ok = ssh_and_set_hostname_over_pi(health_manager.ssh_client, mgmt, model_name)
                                                         if ok:
                                                             print(f" * Hostname restored to {model_name} for device {d['device_id']} (auto-release).")
                                                         else:
@@ -518,11 +619,10 @@ class ReservationMonitor(threading.Thread):
                 if dirty:
                     write_devices_to_csv(devices)
                 
-                # Check every 10 seconds to reduce I/O load
-                time.sleep(10)
             except Exception:
                 traceback.print_exc()
-                time.sleep(10) # Backoff on error
+            # Check every 5 seconds to reduce I/O load (Backoff on error)
+            time.sleep(5) 
 
 # Initialize the monitor
 reservation_monitor = ReservationMonitor()
@@ -534,7 +634,8 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    #return render_template("index.html") # version-1
+    return render_template("minimal.html") # version-2
 
 def format_reservation_block(d):
     """
@@ -614,6 +715,21 @@ def api_devices():
     return jsonify({"devices": output})
 
 
+@app.route("/api/remove_mgmt_ip", methods=["POST"])
+def api_remove_mgmt_ip():
+    body = request.get_json()
+    device_id = body.get("device_id")
+    if not device_id:
+        return jsonify({"ok": False, "error": "device_id required"}), 400
+    devices = read_devices_from_csv()
+    d = find_device(devices, device_id)
+    if not d:
+        return jsonify({"ok": False, "error": "device not found"}), 404
+    d["mgmt_ip"] = ""
+    write_devices_to_csv(devices)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/reserve", methods=["POST"])
 def api_reserve():
     body = request.get_json()
@@ -653,20 +769,22 @@ def api_reserve():
         port_id = 0
 
     if port_id:
-        # try to set hostname to current user (trim whitespace)
-        new_name = (d.get("current_user") or "").strip()
-        if new_name:
+        # try to set hostname to current user (trim all whitespace)
+        new_name = device_id + '-' + re.sub(r"\s+", "", d.get("current_user") or "")
+        mgmt = d.get("mgmt_ip") or ""
+        ok = False
+        if new_name and mgmt:
             if health_manager.ensure_ssh():
                 with health_manager.ssh_lock:
                     try:
-                        ok = telnet_and_set_hostname(health_manager.ssh_client, PORT_OFFSET + port_id, new_name)
+                        ok = ssh_and_set_hostname_over_pi(health_manager.ssh_client, mgmt, new_name)
                         if ok:
                             print(f" * Hostname set to {new_name} for device {device_id}")
                         else:
                             print(f" * Hostname change to {new_name} failed for device {device_id}")
                     except Exception:
                         traceback.print_exc()
-    return jsonify({"ok": True, "resv_end_time": d["resv_end_time"]})
+    return jsonify({"ok": ok, "resv_end_time": d["resv_end_time"]})
 
 
 @app.route("/api/release", methods=["POST"])
@@ -681,6 +799,7 @@ def api_release():
         return jsonify({"error": "device not found"}), 404
     # Save model_name before overwriting fields (we need it to restore hostname)
     model_name = (d.get("model_name") or "").strip()
+    mgmt = d.get("mgmt_ip") or ""
 
     d["current_user"] = ""
     d["duration"] = ""
@@ -693,12 +812,12 @@ def api_release():
         port_id = int(d.get("port_id", 0))
     except Exception:
         port_id = 0
-
-    if port_id and model_name:
+    ok = False
+    if port_id and model_name and mgmt:
         if health_manager.ensure_ssh():
             with health_manager.ssh_lock:
                 try:
-                    ok = telnet_and_set_hostname(health_manager.ssh_client, PORT_OFFSET + port_id, model_name)
+                    ok = ssh_and_set_hostname_over_pi(health_manager.ssh_client, mgmt, model_name)
                     if ok:
                         print(f" * Hostname restored to {model_name} for device {device_id}")
                     else:
@@ -706,7 +825,7 @@ def api_release():
                 except Exception:
                     traceback.print_exc()
 
-    return jsonify({"ok": True})
+    return jsonify({"ok": ok})
 
 
 @app.route("/api/refresh_health", methods=["POST"])
@@ -740,11 +859,11 @@ def api_refresh_health():
             return jsonify({"ok": True})
 
         health = st.get("health", "unk").lower()
-
-    # Branch by health
-    if health == "up":
+    
+    # Branch by health -> if health == "up" or health == "down", its mgmt_ip should be present
+    if mgmt_ip and is_valid_ipv4(mgmt_ip):
         # Try one immediate ping if we can (best-effort)
-        if mgmt_ip and is_valid_ipv4(mgmt_ip) and health_manager.ensure_ssh():
+        if health_manager.ensure_ssh():
             with health_manager.ssh_lock:
                 try:
                     ok = ssh_ping_once(health_manager.ssh_client, mgmt_ip, count=2, timeout=4)
@@ -760,27 +879,20 @@ def api_refresh_health():
                     st["health"] = "down"
                     st["retry_count"] = 1
                     st["next_check_ts"] = time.time() + DOWN_HEALTH_TIMER
+            
+            return jsonify({"ok": True, "status": st["health"]})
         else:
-            # Nothing to do — leave as-is, schedule next UP_HEALTH_TIMER
-            with device_state_lock:
-                st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
-        return jsonify({"ok": True})
-
-    elif health == "down":
-        # Reset retry_count so the down-health retries start fresh immediately
-        with device_state_lock:
-            st["retry_count"] = 0
-            st["next_check_ts"] = time.time() + 0.1
-        return jsonify({"ok": True})
-
-    else:  # unk
+            return jsonify({"ok": False,  "reason": "unable to open ssh to pi"})
+    
+    # if health == "unk" --> most likely mgmt_ip not present
+    else: 
         # Attempt telnet to console to discover mgmt IP and update if Interface Status is Up
         if port_id is None:
             # can't telnet without port info
             # initialize state to re-check later
             with device_state_lock:
                 st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
-            return jsonify({"ok": False, "reason": "missing port_id"})
+            return jsonify({"ok": False, "reason": "missing port_id, need manual input"})
 
         # Use health_manager's ssh client (singleton). Best-effort.
         if not health_manager.ensure_ssh():
@@ -815,11 +927,17 @@ def api_refresh_health():
                     st["health"] = "unk"   # keep as unk until ping completes
                     st["retry_count"] = 0
                     st["next_check_ts"] = time.time() + 0.1
-                return jsonify({"ok": True, "updated_mgmt_ip": ip_addr})
+                return jsonify({"ok": True, "status": st["health"]})
             else:
                 with device_state_lock:
                     st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
                 return jsonify({"ok": False, "reason": "device not found during update"})
+        elif int_status == "busy":
+            # couldn't find usable ip or interface down
+            with device_state_lock:
+                st["health"] = "busy"
+                st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+            return jsonify({"ok": True, "status": st["health"], "reason": "Telnet to port failed! Selected hunt group busy.", "raw": res.get("raw")})
         else:
             # couldn't find usable ip or interface down
             with device_state_lock:
@@ -859,6 +977,7 @@ def api_config():
 @app.route('/static/<path:p>')
 def static_files(p):
     return send_from_directory('static', p)
+
 
 def start_background_services():
     init_device_state_from_csv()

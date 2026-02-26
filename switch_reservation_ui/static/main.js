@@ -20,8 +20,8 @@ async function updateConfigs(mgmt_ip, port_id) {
     
     const data = await response.json();
     return {
-      av: `http://localhost:${data.av_port}/`,
-      new_main: `http://localhost:${data.new_main_port}/`,
+      av: `https://localhost:${data.av_port}/`,
+      new_main: `https://localhost:${data.new_main_port}/`,
       old_main: `http://localhost:${data.old_main_port}/`,
       console_ip: data.console_ip,
       device_port: data.device_port,
@@ -190,8 +190,8 @@ function updateRow(d) {
       
       container.innerHTML = `
         <a href="${config.av}" target="_blank">AV</a>
-        <a href="${config.new_main}" target="_blank">Main(new)</a>
-        <a href="${config.old_main}" target="_blank">Main(old)</a>
+        <a href="${config.new_main}" target="_blank">Main(https)</a>
+        <a href="${config.old_main}" target="_blank">Main(http)</a>
       `;
       tdUi.appendChild(container);
     } else {

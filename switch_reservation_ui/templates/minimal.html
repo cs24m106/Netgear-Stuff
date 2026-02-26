@@ -39,13 +39,14 @@
           <tr>
             <th class="col-left word-wrap" style="width: 8%;">Id</th>
             <th class="col-left word-wrap" style="width: 14%;">Model</th>
+            <th class="col-left word-wrap" style="width: 10%;">Serial</th>
             <th class="col-left word-wrap" style="width: 10%;">Hardware</th>
             <th class="col-center" style="width: 10%;">UI</th>
             <th class="col-left" style="width: 14%;">Mgmt-Ip</th>
             <th class="col-left" style="width: 5%;">Console</th> 
             <th class="col-left" style="width: 6%;">Health</th>       
             <th class="col-center" style="width: 8%;">Status</th>     
-            <th class="col-left" style="width: 28%;">Reservation</th> 
+            <th class="col-left" style="width: 20%;">Reservation</th> 
             <th class="col-center" style="width: 9%;">Actions</th>
           </tr>
         </thead>
@@ -53,6 +54,11 @@
           <!-- Rows are populated by /static/bootstrap.js -->
         </tbody>
       </table>
+    </div>
+    <div class="add-device-container" style="margin-top: 1rem; display: flex; justify-content: flex-end;">
+      <button id="addDeviceBtn" class="btn btn-success" type="button">
+        + Add Device
+      </button>
     </div>
   </div>
 

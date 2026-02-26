@@ -1,0 +1,9 @@
+main -http, https
+database
+check version serial no
+future reservation
+other devices like ixia, spirent cnf...
+move to nuc intenal
+if telnet busy --> tell which user/ alert user
+mail-id base name .. reminder ?
+copy -

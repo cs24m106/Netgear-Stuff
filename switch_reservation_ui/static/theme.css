@@ -1,58 +1,47 @@
-/* ==========================================================================
-   theme.css — Consolidated Switch Manager UI Stylesheet
-   Light/Dark Theme | Bootstrap 5 Compatible | Responsive
-   ========================================================================== */
-
-/* ==========================================================================
-   1. THEME VARIABLES (Light Default)
-   ========================================================================== */
+/* ========================================
+ * BLOCK 1: Theme Variables (Light Default)
+ * ======================================== */
 :root {
-  /* Base Colors */
   --bg: #ffffff;
   --panel-bg: #ffffff;
+  --muted: #6c757d;
   --text: #212529;
   --muted-text: #495057;
-  --muted: #6c757d;
   --border: #d1d5db;
-  --border-light: #e5e7eb;
-  
-  /* Accent Colors */
+  --border-strong: #9ca3af;
   --accent: #6f42c1;
   --accent-strong: #5b2fa0;
   --accent-contrast: #ffffff;
-  
-  /* Status Colors */
   --status-free: #20c997;
   --status-resv: #ff7b00;
   --status-static: #0d6efd;
   --status-text-on: #ffffff;
-  
-  /* Health Colors */
   --health-up: #198754;
   --health-down: #dc3545;
   --health-busy: #ffc107;
   --health-unk: #6c757d;
-  
-  /* Layout & Spacing */
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow: 0 1px 2px rgba(16,24,40,0.04);
+  --gutter: 0.5rem;
+  --btn-pad-y: 0.18rem;
+  --btn-pad-x: 0.36rem;
+  --btn-icon-size: 0.95rem;
   --chip-radius: 0.36rem;
   --table-font-size: 0.95rem;
   --table-cell-pad-y: 0.28rem;
   --table-cell-pad-x: 0.5rem;
-  --btn-icon-size: 1rem;
 }
 
-/* ==========================================================================
-   2. DARK THEME VARIABLES
-   ========================================================================== */
+/* ========================================
+ * BLOCK 2: Dark Theme Variables
+ * ======================================== */
 body[data-theme="dark"] {
   --bg: #0b1220;
   --panel-bg: #071122;
+  --muted: #98a0b3;
   --text: #e6eef8;
   --muted-text: #c0c9da;
-  --muted: #98a0b3;
-  --border: rgba(255, 255, 255, 0.15);
-  --border-light: rgba(255, 255, 255, 0.08);
+  --border: rgba(255,255,255,0.15);
+  --border-strong: rgba(255,255,255,0.25);
   --accent: #9b7cf6;
   --accent-strong: #8b61ff;
   --accent-contrast: #0f1724;
@@ -67,23 +56,22 @@ body[data-theme="dark"] {
   --shadow: none;
 }
 
-/* Fix HTML background for dark mode scrolling */
 html:has(body[data-theme="dark"]) {
   --bg: #0b1220;
   --panel-bg: #071122;
-  --border: rgba(255, 255, 255, 0.15);
+  --border: rgba(255,255,255,0.15);
 }
 
-/* ==========================================================================
-   3. BASE DOCUMENT & LAYOUT
-   ========================================================================== */
+/* ========================================
+ * BLOCK 3: Base Document & Layout
+ * ======================================== */
 html, body {
   height: 100%;
   margin: 0;
   padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 220ms ease, color 220ms ease;
@@ -103,7 +91,6 @@ body {
   flex: 1;
 }
 
-/* Page Chrome */
 .topbar {
   display: flex;
   align-items: center;
@@ -126,14 +113,9 @@ body {
   align-items: center;
 }
 
-.meta-small {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-/* ==========================================================================
-   4. TABLE STYLING (Visible Borders Light & Dark)
-   ========================================================================== */
+/* ========================================
+ * BLOCK 4: Table Styling
+ * ======================================== */
 .table {
   background: transparent;
   border-collapse: separate;
@@ -146,21 +128,20 @@ body {
 #devices_table {
   width: 100% !important;
   table-layout: auto;
-  border: 2px solid var(--border) !important;
+  border: 2px solid var(--border-strong) !important;
   border-radius: 0.45rem;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
 }
 
-/* Header - Center Aligned with Column Dividers */
 #devices_table thead th {
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.02), transparent);
+  background: linear-gradient(180deg, rgba(0,0,0,0.02), transparent);
   padding: calc(var(--table-cell-pad-y) + 0.06rem) var(--table-cell-pad-x);
   font-weight: 700;
   font-size: 0.85rem;
   color: var(--muted);
   text-align: center !important;
-  border-bottom: 2px solid var(--border) !important;
+  border-bottom: 2px solid var(--border-strong) !important;
   border-right: 1px solid var(--border);
   white-space: nowrap;
   vertical-align: middle;
@@ -170,12 +151,11 @@ body {
   border-right: none;
 }
 
-/* Body Cells */
 #devices_table tbody td {
   padding: var(--table-cell-pad-y) var(--table-cell-pad-x);
   vertical-align: middle;
-  border-bottom: 1px solid var(--border-light);
-  border-right: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   white-space: nowrap;
   font-size: 0.95rem;
   color: var(--muted-text);
@@ -190,20 +170,38 @@ body {
   border-bottom: none;
 }
 
-/* Row Hover */
 #devices_table tbody tr {
   transition: background-color 140ms ease;
 }
 
 #devices_table tbody tr:hover {
-  background: rgba(0, 0, 0, 0.02);
+  background: rgba(0,0,0,0.02);
+}
+
+body[data-theme="dark"] #devices_table {
+  background: var(--panel-bg);
+  border-color: var(--border-strong) !important;
+}
+
+body[data-theme="dark"] #devices_table thead th {
+  background: rgba(255,255,255,0.02);
+  border-bottom-color: var(--border-strong) !important;
+  border-right-color: var(--border);
+}
+
+body[data-theme="dark"] #devices_table tbody td {
+  border-bottom-color: var(--border);
+  border-right-color: var(--border);
 }
 
 body[data-theme="dark"] #devices_table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255,255,255,0.03);
 }
 
-/* Word Wrap Utility */
+body[data-theme="dark"] .table-responsive {
+  background: var(--panel-bg);
+}
+
 .word-wrap {
   white-space: normal !important;
   overflow-wrap: anywhere !important;
@@ -211,110 +209,56 @@ body[data-theme="dark"] #devices_table tbody tr:hover {
   max-width: 18rem;
 }
 
-/* Column Alignment */
-.col-left {
-  text-align: left;
-}
+.col-left { text-align: left; }
+.col-center { text-align: center !important; vertical-align: middle !important; }
 
-.col-center {
-  text-align: center !important;
-  vertical-align: middle !important;
-}
-
-/* ==========================================================================
-   5. DARK MODE TABLE BORDERS (High Contrast)
-   ========================================================================== */
-body[data-theme="dark"] #devices_table {
-  background: var(--panel-bg);
-  border: 2px solid var(--border) !important;
-}
-
-body[data-theme="dark"] #devices_table thead th {
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--muted);
-  border-bottom: 2px solid var(--border) !important;
-  border-right: 1px solid var(--border);
-}
-
-body[data-theme="dark"] #devices_table thead th:last-child {
-  border-right: none;
-}
-
-body[data-theme="dark"] #devices_table tbody td {
-  color: var(--muted-text);
-  border-bottom: 1px solid var(--border-light);
-  border-right: 1px solid var(--border-light);
-  background: transparent;
-}
-
-body[data-theme="dark"] .table-responsive {
-  background: var(--panel-bg);
-}
-
-body[data-theme="dark"] td pre {
-  color: var(--muted-text);
-  background: transparent;
-}
-
-/* ==========================================================================
-   6. ICON-ONLY BUTTONS (Consistent Size & Borders)
-   ========================================================================== */
-.btn-icon-only, .icon-only {
-  padding: 0.25rem 0.35rem !important;
-  min-width: 2rem !important;
-  height: 2rem !important;
-  font-size: var(--btn-icon-size) !important;
-  line-height: 1 !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+/* ========================================
+ * BLOCK 5: Controls & Buttons
+ * ======================================== */
+.btn {
+  border-radius: 0.375rem;
+  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
   border: 1px solid var(--border) !important;
-  background: transparent !important;
-  color: var(--text) !important;
-  border-radius: 0.35rem !important;
-  transition: all 150ms ease !important;
-  cursor: pointer;
 }
 
-.btn-icon-only:hover, .icon-only:hover {
-  background: rgba(0, 0, 0, 0.05) !important;
-  border-color: var(--accent) !important;
+.btn:hover {
+  border-color: var(--border-strong) !important;
 }
 
-body[data-theme="dark"] .btn-icon-only,
-body[data-theme="dark"] .icon-only {
-  border-color: var(--border);
+.btn.icon-only {
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  min-width: 1.75rem;
+  height: auto;
+  font-size: var(--btn-icon-size);
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border) !important;
+  background: transparent;
+  color: var(--text);
 }
 
-body[data-theme="dark"] .btn-icon-only:hover,
-body[data-theme="dark"] .icon-only:hover {
-  background: rgba(255, 255, 255, 0.1) !important;
-  border-color: var(--accent) !important;
+.btn.icon-only:hover {
+  background: rgba(0,0,0,0.05);
+  border-color: var(--border-strong) !important;
 }
 
-/* Edit Button Specific */
-.btn-icon-only.action-edit {
-  color: var(--accent) !important;
-  border-color: var(--accent) !important;
+body[data-theme="dark"] .btn.icon-only {
+  border-color: var(--border) !important;
 }
 
-.btn-icon-only.action-edit:hover {
-  background: var(--accent) !important;
-  color: #ffffff !important;
+body[data-theme="dark"] .btn.icon-only:hover {
+  background: rgba(255,255,255,0.1);
+  border-color: var(--border-strong) !important;
 }
 
-/* ==========================================================================
-   7. ACTION BUTTONS (Reserve/Release)
-   ========================================================================== */
-.action-reserve, .action-release {
+.action-reserve, .action-release, .action-delete {
   padding: 0.20rem 0.45rem;
   font-weight: 700;
   font-size: 0.80rem;
-  border: none;
+  border: 1px solid var(--border) !important;
   color: #ffffff;
-  border-radius: 0.35rem;
-  cursor: pointer;
-  transition: filter 120ms ease;
 }
 
 .action-reserve {
@@ -324,6 +268,7 @@ body[data-theme="dark"] .icon-only:hover {
 .action-reserve:hover {
   background: var(--status-free);
   filter: brightness(0.9);
+  border-color: var(--border-strong) !important;
 }
 
 .action-release {
@@ -336,60 +281,63 @@ body[data-theme="dark"] .icon-only:hover {
   background: var(--status-resv);
   filter: brightness(0.9);
   color: #ffffff;
+  border-color: var(--border-strong) !important;
 }
 
-/* ==========================================================================
-   8. INPUT FIELDS (Reservation & Inline Edit)
-   ========================================================================== */
+.action-delete {
+  background: #dc3545;
+  color: #ffffff;
+}
+
+.action-delete:hover {
+  background: #bb2d3b;
+  color: #ffffff;
+  border-color: var(--border-strong) !important;
+}
+
+.d-flex.gap-2 { gap: 0.35rem !important; }
+
+/* ========================================
+ * BLOCK 6: Input Fields
+ * ======================================== */
 .resv-inputs input[type="text"],
 .resv-inputs input[type="number"],
-.inline-edit-input,
-.modal-input {
-  width: 100%;
-  padding: 0.35rem 0.5rem;
+.modal-input,
+.console-port-input {
   border: 1px solid var(--border);
+  padding: 0.35rem 0.5rem;
   border-radius: 0.35rem;
   font-size: 0.85rem;
   color: var(--text);
   background: var(--panel-bg);
   transition: border-color 150ms ease, box-shadow 150ms ease;
-  box-sizing: border-box;
 }
 
 .resv-inputs input:focus,
-.inline-edit-input:focus,
-.modal-input:focus {
+.modal-input:focus,
+.console-port-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(111, 66, 193, 0.08);
+  box-shadow: 0 0 0 3px rgba(111,66,193,0.08);
 }
 
 body[data-theme="dark"] .resv-inputs input,
-body[data-theme="dark"] .inline-edit-input,
-body[data-theme="dark"] .modal-input {
+body[data-theme="dark"] .modal-input,
+body[data-theme="dark"] .console-port-input {
   border-color: var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255,255,255,0.02);
 }
 
 body[data-theme="dark"] .resv-inputs input:focus,
-body[data-theme="dark"] .inline-edit-input:focus,
-body[data-theme="dark"] .modal-input:focus {
+body[data-theme="dark"] .modal-input:focus,
+body[data-theme="dark"] .console-port-input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(155, 124, 246, 0.12);
+  box-shadow: 0 0 0 3px rgba(155,124,246,0.12);
 }
 
-.inline-edit-input[readonly] {
-  background: rgba(0, 0, 0, 0.05);
-  cursor: not-allowed;
-}
-
-body[data-theme="dark"] .inline-edit-input[readonly] {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-/* ==========================================================================
-   9. RESERVATION CONTAINER (Centered for Free Status)
-   ========================================================================== */
+/* ========================================
+ * BLOCK 7: Reservation Container
+ * ======================================== */
 .resv-container {
   display: flex;
   flex-direction: column;
@@ -441,7 +389,6 @@ body[data-theme="dark"] .inline-edit-input[readonly] {
   text-align: center;
 }
 
-/* Reservation Info (resv/static) - Left Aligned */
 #devices_table tbody td pre {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
@@ -450,9 +397,14 @@ body[data-theme="dark"] .inline-edit-input[readonly] {
   text-align: left;
 }
 
-/* ==========================================================================
-   10. CELL LAYOUT UTILITIES
-   ========================================================================== */
+#devices_table tbody td.col-left:has(.resv-container) {
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* ========================================
+ * BLOCK 8: Cell Layout Utilities
+ * ======================================== */
 .cell-flex, .mgmt-actions, .console-actions {
   display: flex;
   align-items: center;
@@ -480,37 +432,20 @@ body[data-theme="dark"] .inline-edit-input[readonly] {
   padding: 0;
 }
 
-.ui-stack a + a {
-  margin-top: 0.12rem;
-}
+.ui-stack a + a { margin-top: 0.12rem; }
+.ui-stack a:hover { text-decoration: underline; }
 
-.ui-stack a:hover {
-  text-decoration: underline;
-}
-
-/* Actions Wrap - Center by Default, Left in Edit Mode */
 .actions-wrap {
   display: flex;
   gap: 0.32rem;
   align-items: center;
+  justify-content: center;
   width: 100%;
 }
 
-#devices_table tbody td.col-center .actions-wrap {
-  justify-content: center;
-}
-
-#devices_table tbody td.col-center .actions-wrap[style*="flex-start"] {
-  justify-content: flex-start !important;
-}
-
-.actions-wrap .btn {
-  white-space: nowrap;
-}
-
-/* ==========================================================================
-   11. STATUS & HEALTH CHIPS
-   ========================================================================== */
+/* ========================================
+ * BLOCK 9: Status & Health Chips
+ * ======================================== */
 .status-free, .status-resv, .status-static {
   display: inline-block;
   padding: 0.18rem 0.5rem;
@@ -540,140 +475,79 @@ body[data-theme="dark"] .inline-edit-input[readonly] {
   border-radius: 0.32rem;
   font-weight: 700;
   font-size: 0.82rem;
-  color: #ffffff;
+  color: #fff;
   box-shadow: var(--shadow);
 }
 
-.health-up {
-  background: var(--health-up);
+.health-up { background: var(--health-up); }
+.health-down { background: var(--health-down); }
+.health-busy { background: var(--health-busy); color: #212529; }
+.health-unk { background: var(--health-unk); }
+
+/* ========================================
+ * BLOCK 10: Add Form Container
+ * ======================================== */
+.add-form-container {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  padding: 0.8rem;
 }
 
-.health-down {
-  background: var(--health-down);
+.add-form-container label {
+  color: var(--muted);
 }
 
-.health-busy {
-  background: var(--health-busy);
-  color: #212529;
+.add-form-container .modal-input {
+  width: 100%;
 }
 
-.health-unk {
-  background: var(--health-unk);
-}
-
-/* ==========================================================================
-   12. EDIT MODE ROW STYLING
-   ========================================================================== */
-tr.editing-mode {
-  background: rgba(111, 66, 193, 0.05) !important;
-}
-
-body[data-theme="dark"] tr.editing-mode {
-  background: rgba(155, 124, 246, 0.08) !important;
-}
-
-#inline-add-row, #inline-edit-row {
-  background: rgba(111, 66, 193, 0.05);
-}
-
-body[data-theme="dark"] #inline-add-row,
-body[data-theme="dark"] #inline-edit-row {
-  background: rgba(155, 124, 246, 0.08);
-}
-
-/* ==========================================================================
-   13. RESPONSIVE TWEAKS
-   ========================================================================== */
+/* ========================================
+ * BLOCK 11: Responsive Tweaks
+ * ======================================== */
 @media (max-width: 1400px) {
-  .input-user {
-    max-width: 15rem;
-  }
-  .resv-container {
-    min-width: 12rem;
-  }
+  .input-user { max-width: 15rem; }
+  .resv-container { min-width: 12rem; }
 }
 
 @media (max-width: 1100px) {
-  .word-wrap {
-    max-width: 14rem;
-  }
-  .input-user {
-    min-width: 10rem;
-    max-width: 12rem;
-  }
-  .input-compact {
-    width: 3.2rem;
-  }
-  .resv-container {
-    min-width: 11rem;
-  }
+  .word-wrap { max-width: 14rem; }
+  .input-user { min-width: 10rem; max-width: 12rem; }
+  .input-compact { width: 3.2rem; }
+  .resv-container { min-width: 11rem; }
 }
 
 @media (max-width: 760px) {
-  #devices_table thead th {
-    font-size: 0.78rem;
-    padding: 0.18rem 0.36rem;
-  }
-  #devices_table tbody td {
-    font-size: 0.86rem;
-    padding: 0.18rem 0.36rem;
-  }
-  .ui-stack a {
-    font-size: 0.78rem;
-  }
-  .input-user {
-    min-width: 8rem;
-    max-width: 10rem;
-  }
-  .input-compact {
-    width: 2.8rem;
-  }
-  .resv-row {
-    gap: 0.2rem;
-  }
-  .resv-row .meta-small {
-    font-size: 0.72rem;
-  }
-  .topbar {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.8rem;
-  }
-  .toolbar {
-    width: 100%;
-    justify-content: space-between;
-  }
+  #devices_table thead th { font-size: 0.78rem; padding: 0.18rem 0.36rem; }
+  #devices_table tbody td { font-size: 0.86rem; padding: 0.18rem 0.36rem; }
+  .ui-stack a { font-size: 0.78rem; }
+  .input-user { min-width: 8rem; max-width: 10rem; }
+  .input-compact { width: 2.8rem; }
+  .resv-row { gap: 0.2rem; }
+  .resv-row .meta-small { font-size: 0.72rem; }
+  .topbar { flex-direction: column; align-items: flex-start; gap: 0.8rem; }
+  .toolbar { width: 100%; justify-content: space-between; }
 }
 
 @media (max-width: 580px) {
-  .input-user {
-    min-width: 7rem;
-  }
-  .input-compact {
-    width: 2.4rem;
-  }
-  .resv-container {
-    min-width: 10rem;
-  }
+  .input-user { min-width: 7rem; }
+  .input-compact { width: 2.4rem; }
+  .resv-container { min-width: 10rem; }
 }
 
-/* ==========================================================================
-   14. ACCESSIBILITY & UTILITIES
-   ========================================================================== */
+/* ========================================
+ * BLOCK 12: Accessibility & Utilities
+ * ======================================== */
 [role], a:focus, button:focus, input:focus {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(111, 66, 193, 0.10);
+  box-shadow: 0 0 0 3px rgba(111,66,193,0.10);
   border-color: var(--accent);
 }
 
-/* Toast Container Override */
+.meta-small { color: var(--muted); font-size: 0.85rem; }
+
 body[data-theme="dark"] .toast-body {
   color: var(--text);
   background: var(--panel-bg);
   border: 1px solid var(--border);
-}
-
-/* D-flex Gap Utility */
-.d-flex.gap-2 {
-  gap: 0.35rem !important;
 }

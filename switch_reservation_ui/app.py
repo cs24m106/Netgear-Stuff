@@ -219,7 +219,6 @@ def telnet_and_run_show_serviceport(ssh_client, device_port, login_user=SWITCH_U
         # If we did not get a prompt yet, try sending a newline to elicit it
         if not re.search(r"\)[>#]\s*$", out):
             int_status = "busy"
-            # handle errors after telnet connection
             if re.search(r"hunt group busy", out, re.IGNORECASE) or re.search(r"Connection refused", out, re.IGNORECASE):
                 if app.debug:
                     print("[DEBUG] Detected 'hunt group busy' after telnet connection.")

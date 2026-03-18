@@ -749,7 +749,7 @@ let addFormVisible = false;
 const ADD_FORM_FIELD_DEFS = {
     device_id: { label: 'Device ID', required: true, width: '8rem', placeholder: 'ng-xxx' },
     serial_no: { label: 'Serial No', required: false, width: '10rem' },
-    model_name: { label: 'Model Name', required: false, width: '12rem', placeholder: 'Mxxx-**-PoE*' },
+    model_name: { label: 'Model Name', required: false, width: '12rem', placeholder: 'Mxxxx-**-PoE*' },
     hw_id: { label: 'Hardware ID', required: false, width: '9rem' },
     console_ip: { label: 'Console IP', required: true, width: '10rem', placeholder: '—.—.—.—' },
     port_id: { label: 'Console Port', required: true, width: '7rem', placeholder: 'Port No.', type: 'number', min: 1, max: 64 }

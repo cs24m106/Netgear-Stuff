@@ -11,13 +11,15 @@ const API = {
     dbAdd: '/api/db/add',
     dbEdit: '/api/db/edit',
     dbDel: '/api/db/delete',
-    dbConsolePort: '/api/db/console'
+    dbConsoleIp: '/api/db/console/ip',
+    dbConsolePort: '/api/db/console/port',
 };
 
 const POLL_INTERVAL_MS = 2000;
 const UPDATE_DEBOUNCE_MS = 180;
+let PORT_OFFSET = 10000;
 const ROW_ID_PREFIX = 'row-';
-const UPDATABLE_FIELDS = ["device_id", "serial_no", "model_name", "hw_id", "port_id"];
+const UPDATABLE_FIELDS = ["device_id", "serial_no", "model_name", "hw_id", "console_ip", "port_id"];
 
 /* =========================
  * 2. Utility Helpers
@@ -247,10 +249,11 @@ function createRowForDevice(d) {
                 console.error(err);
             }
         });
-        const copyBtn = ce('button', { type: 'button', class: 'icon-only', title: `ssh admin@${d.mgmt_ip}` }, '⧉');
+        const ssh = `ssh admin@${d.mgmt_ip}`;
+        const copyBtn = ce('button', { type: 'button', class: 'icon-only', title: ssh }, '⧉');
         copyBtn.addEventListener('click', () => {
-            copyToClipboard(`ssh admin@${d.mgmt_ip}`);
-            showToast('Copied', `ssh admin@${d.mgmt_ip}`, { autohide: 1200, type: 'info' });
+            copyToClipboard(ssh);
+            showToast('Copied', ssh, { autohide: 1200, type: 'info' });
         });
         mgmtWrap.appendChild(removeBtn);
         mgmtWrap.appendChild(copyBtn);
@@ -258,9 +261,41 @@ function createRowForDevice(d) {
     tdMgmt.appendChild(mgmtWrap);
     tr.appendChild(tdMgmt);
     
-    // 5: Console (EDITABLE INPUT)
+    // 5: Console IP (line 1) + port + copy (line 2)
     const tdConsole = ce('td', { class: 'col-left' });
-    const consoleWrap = ce('div', { class: 'cell-flex console-actions' });
+    const consoleWrap = ce('div', { class: 'console-cell' });
+    const ipLine = ce('div', { class: 'console-ip-line' });
+    const ipInp = ce('input', {
+        type: 'text',
+        class: 'console-ip-input',
+        value: d.console_ip || '',
+        placeholder: '—.—.—.—',
+        inputmode: 'decimal',
+        autocomplete: 'on'
+    });
+    ipInp.addEventListener('change', async () => {
+        const val = ipInp.value.trim();
+        try {
+            const res = await postJSON(API.dbConsoleIp, { device_id: d.device_id, console_ip: val });
+            if (res.ok) {
+                showToast('Console IP', val ? `Set to ${val}` : 'Console IP updated', { type: 'success', autohide: 1500 });
+                if (res.mgmt_ip) {
+                    showToast('Auto-Discover', `mgmt_ip discovered: ${res.mgmt_ip}`, { type: 'success', autohide: 2000 });
+                }
+                pollAndUpdate(true);
+            } else {
+                showToast('Error', res.error || res.reason || 'Failed to update console IP', { type: 'error' });
+                ipInp.value = d.console_ip || '';
+            }
+        } catch (err) {
+            showToast('Error', 'Failed to update console IP', { type: 'error' });
+            ipInp.value = d.console_ip || '';
+        }
+    });
+    ipLine.appendChild(ipInp);
+    consoleWrap.appendChild(ipLine);
+
+    const portRow = ce('div', { class: 'console-port-row' });
     const portInp = ce('input', {
         type: 'number',
         class: 'console-port-input',
@@ -290,7 +325,19 @@ function createRowForDevice(d) {
             portInp.value = d.port_id || '';
         }
     });
-    consoleWrap.appendChild(portInp);
+    portRow.appendChild(portInp);
+
+    if (d.console_ip && d.port_id) {
+        const p0 = parseInt(String(d.port_id), 0);
+        const telnet = `telnet ${d.console_ip} ${PORT_OFFSET + p0}`;
+        const copyBtn = ce('button', { type: 'button', class: 'icon-only console-copy-btn', title: telnet }, '⧉');
+        copyBtn.addEventListener('click', () => {
+            copyToClipboard(telnet);
+            showToast('Copied', telnet, { autohide: 1200, type: 'info' });
+        });
+        portRow.appendChild(copyBtn);
+    }
+    consoleWrap.appendChild(portRow);
     tdConsole.appendChild(consoleWrap);
     tr.appendChild(tdConsole);
     
@@ -359,17 +406,9 @@ function createRowForDevice(d) {
                     uiStack.appendChild(a);
                 }
             }
-            if (cfg.console_ip && cfg.device_port) {
-                const telnet = `telnet ${cfg.console_ip} ${cfg.device_port}`;
-                const tbtn = ce('button', { type: 'button', class: 'icon-only', title: telnet }, '⧉');
-                tbtn.addEventListener('click', () => {
-                    copyToClipboard(telnet);
-                    showToast('Copied', telnet, { autohide: 1200 });
-                });
-                const consWrap = tdConsole.querySelector('.console-actions');
-                consWrap.appendChild(tbtn);
-                bootstrapifyButtons(consWrap);
-            }
+            const po = cfg.port_offset;
+            if (po != null && po !== '' && !Number.isNaN(Number(po)))
+                PORT_OFFSET = Number(po);
         } catch (err) {
             console.debug('config fetch failed for', d.device_id, err);
         }
@@ -561,10 +600,11 @@ function updateRow(d) {
                         showToast('Error', 'Failed to remove mgmt-ip', { type: 'error' });
                     }
                 });
-                const copyBtn = ce('button', { type: 'button', class: 'icon-only', title: `ssh admin@${d.mgmt_ip}` }, '⧉');
+                const ssh = `ssh admin@${d.mgmt_ip}`;
+                const copyBtn = ce('button', { type: 'button', class: 'icon-only', title: ssh }, '⧉');
                 copyBtn.addEventListener('click', () => {
-                    copyToClipboard(`ssh admin@${d.mgmt_ip}`);
-                    showToast('Copied', `ssh admin@${d.mgmt_ip}`);
+                    copyToClipboard(ssh);
+                    showToast('Copied', ssh);
                 });
                 mgmtWrap.appendChild(removeBtn);
                 mgmtWrap.appendChild(copyBtn);
@@ -573,11 +613,31 @@ function updateRow(d) {
         }
     }
     
-    // 5: console port (input value)
+    // 5: console IP + port inputs; copy btn on row 2 when IP & port exist
     if (cells[5]) {
+        const ipInp = cells[5].querySelector('.console-ip-input');
+        const newIp = d.console_ip || '';
+        if (ipInp && document.activeElement !== ipInp && ipInp.value !== newIp) ipInp.value = newIp;
+
         const portInp = cells[5].querySelector('.console-port-input');
         const newPort = (d.port_id == null || d.port_id === '') ? '' : String(d.port_id);
-        if (portInp && portInp.value !== newPort) portInp.value = newPort;
+        if (portInp && document.activeElement !== portInp && portInp.value !== newPort) portInp.value = newPort;
+
+        const portRow = cells[5].querySelector('.console-port-row');
+        let copyBtn = cells[5].querySelector('.console-copy-btn');
+        const portNum = parseInt(String(d.port_id || ''), 0);
+        if (showCopy) {
+            const telnet = `telnet ${d.console_ip} ${PORT_OFFSET + portNum}`;
+            if (!copyBtn && portRow) {
+                copyBtn = ce('button', { type: 'button', class: 'icon-only console-copy-btn', title: telnet }, '⧉');
+                copyBtn.addEventListener('click', () => {
+                    copyToClipboard(telnet);
+                    showToast('Copied', telnet, { autohide: 1200, type: 'info' });
+                });
+                portRow.appendChild(copyBtn);
+                bootstrapifyButtons(portRow);
+            } else if (copyBtn) copyBtn.title = telnetTitle;
+        } else if (copyBtn) copyBtn.remove();
     }
     
     // 6: health
@@ -685,6 +745,16 @@ function stopPolling() {
  * ========================= */
 let addFormVisible = false;
 
+/** Labels/types for inline add form — order follows UPDATABLE_FIELDS */
+const ADD_FORM_FIELD_DEFS = {
+    device_id: { label: 'Device ID', required: true, width: '8rem', placeholder: 'ng-xxx' },
+    serial_no: { label: 'Serial No', required: false, width: '10rem' },
+    model_name: { label: 'Model Name', required: false, width: '12rem', placeholder: 'Mxxx-**-PoE*' },
+    hw_id: { label: 'Hardware ID', required: false, width: '9rem' },
+    console_ip: { label: 'Console IP', required: true, width: '10rem', placeholder: '—.—.—.—' },
+    port_id: { label: 'Console Port', required: true, width: '7rem', placeholder: 'Port No.', type: 'number', min: 1, max: 64 }
+};
+
 function toggleAddForm() {
     const existingForm = document.getElementById('inline-add-form');
     if (existingForm) {
@@ -704,13 +774,7 @@ function toggleAddForm() {
         style: 'display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-end; justify-content: center;'
     });
     
-    const fields = [
-        { name: 'device_id', label: 'Device ID', required: true, width: '8rem' },
-        { name: 'serial_no', label: 'Serial No', required: false, width: '10rem' },
-        { name: 'model_name', label: 'Model Name', required: false, width: '12rem' },
-        { name: 'hw_id', label: 'Hardware ID', required: false, width: '9rem' },
-        { name: 'port_id', label: 'Console Port No', required: true, width: '7rem', type: 'number', min: 1, max: 64 }
-    ];
+    const fields = UPDATABLE_FIELDS.map(name => ({ name, ...ADD_FORM_FIELD_DEFS[name] }));
     
     const inputs = {};
     
@@ -724,7 +788,7 @@ function toggleAddForm() {
             type: field.type || 'text',
             class: 'modal-input',
             style: `width: ${field.width};`,
-            placeholder: field.label
+            placeholder: field.placeholder != null ? field.placeholder : field.label
         });
         if (field.type === 'number') {
             input.min = field.min || 1;
@@ -751,31 +815,38 @@ function toggleAddForm() {
     
     saveBtn.onclick = async () => {
         const device_id = inputs.device_id.value.trim();
+        const console_ip = inputs.console_ip.value.trim();
         const port_id = inputs.port_id.value.trim();
-        
+
         if (!device_id) {
             showToast('Error', 'Device ID is required', { type: 'error' });
             inputs.device_id.focus();
             return;
         }
+        if (!console_ip) {
+            showToast('Error', 'Console IP is required', { type: 'error' });
+            inputs.console_ip.focus();
+            return;
+        }
         if (!port_id) {
-            showToast('Error', 'Port ID is required', { type: 'error' });
+            showToast('Error', 'Console port is required', { type: 'error' });
             inputs.port_id.focus();
             return;
         }
-        
-        const portNum = parseInt(port_id);
+
+        const portNum = parseInt(port_id, 0);
         if (portNum < 1 || portNum > 64) {
             showToast('Error', 'Port must be between 1-64', { type: 'error' });
             inputs.port_id.focus();
             return;
         }
-        
+
         const payload = {
             device_id: device_id,
             serial_no: inputs.serial_no.value.trim(),
             model_name: inputs.model_name.value.trim(),
             hw_id: inputs.hw_id.value.trim(),
+            console_ip: console_ip,
             port_id: portNum
         };
         

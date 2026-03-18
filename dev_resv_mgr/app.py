@@ -36,7 +36,7 @@ CSV_PATH = "database.csv"
 CSV_LOCK_PATH = CSV_PATH + ".lock"
 LOG_PATH = "operations.log"
 LOG_LOCK_PATH = LOG_PATH + ".lock"
-UPDATABLE_FIELDS = ["device_id", "serial_no", "model_name", "hw_id", "port_id"] 
+UPDATABLE_FIELDS = ["device_id", "serial_no", "model_name", "hw_id", "console_ip", "port_id"] 
 
 # -----------------------
 # Backend state & Operation Logging (Audit Trail)
@@ -67,7 +67,7 @@ def write_devices_to_csv(devices):
     lock = FileLock(CSV_LOCK_PATH, timeout=10)
     with lock:
         with open(CSV_PATH, "w", newline='') as f:
-            fieldnames = ["device_id","serial_no", "model_name","hw_id","mgmt_ip","port_id","tag","current_user","duration","resv_end_time"]
+            fieldnames = ["device_id","serial_no", "model_name","hw_id","mgmt_ip","console_ip","port_id","tag","current_user","duration","resv_end_time"]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for d in devices:
@@ -272,9 +272,9 @@ def _read_channel_until(channel, timeout_sec=1, stop_patterns=None):
         pass
     return buf.decode(errors="ignore")
 
-def telnet_and_run_show_serviceport(ssh_client, device_port, login_user=SWITCH_USER, login_pass=SWITCH_PASSWORD):
+def telnet_and_run_show_serviceport(ssh_client, console_ip, device_port, login_user=SWITCH_USER, login_pass=SWITCH_PASSWORD):
     """
-    Telnet to CONSOLE_IP:device_port using an interactive shell (invoke_shell).
+    Telnet to console_ip:device_port using an interactive shell (invoke_shell).
     Handles optional User:/Password: prompts, attempts to reach switch CLI prompt '>' or '#'.
     If it reaches prompt, runs 'show serviceport' and returns parsed result dict:
       {"interface_status": "Up"/"Down"/None, "ip": "x.x.x.x"/None, "raw": "<output>"}
@@ -282,7 +282,7 @@ def telnet_and_run_show_serviceport(ssh_client, device_port, login_user=SWITCH_U
     """
     try:
         if app.debug:
-            print(f"[DEBUG] telnet_and_run_show_serviceport: console_ip={CONSOLE_IP}, device_port={device_port}")
+            print(f"[DEBUG] telnet_and_run_show_serviceport: console_ip={console_ip}, device_port={device_port}")
 
         if not device_port:
             if app.debug:
@@ -293,7 +293,7 @@ def telnet_and_run_show_serviceport(ssh_client, device_port, login_user=SWITCH_U
         if app.debug:
             print("[DEBUG] Starting telnet session...")
         # Start telnet
-        chan.send(f"telnet {CONSOLE_IP} {device_port}\n")
+        chan.send(f"telnet {console_ip} {device_port}\n")
         # initial small read
         out = _read_channel_until(chan, timeout_sec=1)
         if app.debug:
@@ -422,7 +422,7 @@ def telnet_and_run_show_serviceport(ssh_client, device_port, login_user=SWITCH_U
         return None
 
 # CHANGE: replace telnet-based hostname setter with nested SSH over the PI (uses existing ssh_client.invoke_shell())
-def ssh_and_set_hostname_over_pi(ssh_client, mgmt_ip, new_hostname, serial_no='', login_user=SWITCH_USER, login_pass=SWITCH_PASSWORD):
+def ssh_and_set_hostname(ssh_client, mgmt_ip, new_hostname, serial_no='', login_user=SWITCH_USER, login_pass=SWITCH_PASSWORD):
     """
     Use the existing ssh_client (connected to the PI/console) and from that shell run:
         ssh {login_user}@{mgmt_ip}
@@ -435,7 +435,7 @@ def ssh_and_set_hostname_over_pi(ssh_client, mgmt_ip, new_hostname, serial_no=''
     """
     try:
         if app.debug:
-            print(f"[DEBUG] ssh_and_set_hostname_over_pi: mgmt_ip={mgmt_ip}, new_hostname={new_hostname}")
+            print(f"[DEBUG] ssh_and_set_hostname: mgmt_ip={mgmt_ip}, new_hostname={new_hostname}")
 
         if not mgmt_ip:
             if app.debug:
@@ -582,7 +582,7 @@ def ssh_and_set_hostname_over_pi(ssh_client, mgmt_ip, new_hostname, serial_no=''
 
     except Exception as e:
         if app.debug:
-            print(f"[DEBUG] Exception in ssh_and_set_hostname_over_pi: {e}")
+            print(f"[DEBUG] Exception in ssh_and_set_hostname: {e}")
             traceback.print_exc()
         chan.close()
         return False, f"Exception: {e}"
@@ -613,14 +613,10 @@ class ReservationMonitor(threading.Thread):
                         if now >= end_dt:
                             print(f">>> $ [Auto-Release] Expired reservation for {d['device_id']}. Releasing...")
 
-                            # Capture model_name & port_id before clearing fields
+                            # Capture model_name
                             model_name = (d.get("model_name") or "").strip()
                             mgmt = d.get("mgmt_ip") or ""
-                            try:
-                                port_id = int(d.get("port_id", 0))
-                            except Exception:
-                                port_id = 0
-
+                            
                             # Mark as released locally (CSV will be written later)
                             d["tag"] = "free"
                             d["current_user"] = ""
@@ -630,12 +626,11 @@ class ReservationMonitor(threading.Thread):
 
                             # Best-effort: restore hostname on physical switch back to model_name
                             # Use the singleton SSH client guarded by health_manager.ssh_lock
-                            if port_id and model_name and mgmt:
+                            if mgmt and model_name:
                                 if health_manager.ensure_ssh():
-                                    serial_no = d.get("serial_no") or ""
                                     with health_manager.ssh_lock:
                                         try:
-                                            ok, msg = ssh_and_set_hostname_over_pi(health_manager.ssh_client, mgmt, model_name, serial_no)
+                                            ok, msg = ssh_and_set_hostname(health_manager.ssh_client, mgmt, model_name)
                                             if ok:
                                                 print(f">>> $ Hostname restored to {model_name} for device {d['device_id']} (auto-release).")
                                             else:
@@ -643,7 +638,7 @@ class ReservationMonitor(threading.Thread):
                                         except Exception:
                                             traceback.print_exc()
                                 else:
-                                    print(f">>> $ Could not open SSH to PI to restore hostname for device {d['device_id']}.")
+                                    print(f">>> $ Could not open SSH to LAB to restore hostname for device {d['device_id']}.")
                 
                 # 3. Save if changes made
                 if dirty:
@@ -751,6 +746,7 @@ def api_devices():
 def api_config():
     data = request.get_json()
     mgmt_ip = data.get("mgmt_ip")
+    console_ip = data.get("console_ip")
     if not mgmt_ip:
         return jsonify({"error":"mgmt_ip required"}), 400
     
@@ -773,8 +769,7 @@ def api_config():
         "av_port": av_port,
         "new_main_port": new_main_port,
         "old_main_port": old_main_port,
-        "console_ip": CONSOLE_IP,
-        "device_port": PORT_OFFSET + port_id,
+        "port_offset": PORT_OFFSET,
     })
 
 # -------------------------------------------------------------------------------------------------
@@ -826,6 +821,9 @@ def api_reserve():
         d["resv_end_time"] = end.isoformat()
 
     # --- Attempt to update switch hostname via telnet over singleton ssh_client ---
+    console_ip = d.get("console_ip") or ""
+    if not console_ip:
+        return jsonify({"error": "console_ip not found"}), 404
     port_id = int(d.get("port_id", 0))
     if not port_id:
         return jsonify({"error": "port_id not found"}), 404
@@ -839,7 +837,7 @@ def api_reserve():
     if new_name and mgmt and health_manager.ensure_ssh():
         with health_manager.ssh_lock:
             try:
-                ok, msg = ssh_and_set_hostname_over_pi(health_manager.ssh_client, mgmt, new_name)
+                ok, msg = ssh_and_set_hostname(health_manager.ssh_client, mgmt, new_name, serial_no)
             except Exception:
                 traceback.print_exc()
     
@@ -874,16 +872,12 @@ def api_release():
     d["resv_end_time"] = ""
     d["tag"] = "free"
 
-    # Attempt to change hostname back to model_name via telnet
-    port_id = int(d.get("port_id", 0))
-    if not port_id:
-        return jsonify({"error": "port_id not found"}), 404
 
     ok = False
-    if port_id and model_name and mgmt and health_manager.ensure_ssh():
+    if mgmt and model_name and health_manager.ensure_ssh():
         with health_manager.ssh_lock:
             try:
-                ok,msg = ssh_and_set_hostname_over_pi(health_manager.ssh_client, mgmt, model_name)
+                ok,msg = ssh_and_set_hostname(health_manager.ssh_client, mgmt, model_name)
             except Exception:
                 traceback.print_exc()
 
@@ -908,6 +902,7 @@ def api_refresh_health():
         return jsonify({"error": "device not found"}), 404
 
     # load CSV to find related metadata (port_id, mgmt_ip)
+    console_ip = d.get("console_ip") or ""
     port_id = int(d.get("port_id", 0))
     mgmt_ip = d.get("mgmt_ip") or ""
 
@@ -951,6 +946,11 @@ def api_refresh_health():
     # if health == "unk" --> most likely mgmt_ip not present
     else: 
         # Attempt telnet to console to discover mgmt IP and update if Interface Status is Up
+        if not (console_ip and is_valid_ipv4(console_ip)): # can't telnet without console ip info (ipv4)
+            with device_state_lock:
+                st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+            return jsonify({"ok": False, "reason": "missing/invalid console_ip, need manual input"})
+        
         if not port_id: # can't telnet without port info (non zero)
             # initialize state to re-check later
             with device_state_lock:
@@ -962,11 +962,11 @@ def api_refresh_health():
             # schedule retry
             with device_state_lock:
                 st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
-            return jsonify({"ok": False, "reason": "unable to open ssh to pi/nuc"})
+            return jsonify({"ok": False, "reason": "unable to open ssh to lab"})
 
         with health_manager.ssh_lock:
             try:
-                res = telnet_and_run_show_serviceport(health_manager.ssh_client, PORT_OFFSET + port_id)
+                res = telnet_and_run_show_serviceport(health_manager.ssh_client, console_ip, PORT_OFFSET + port_id)
             except Exception:
                 res = None
 
@@ -1018,7 +1018,7 @@ def api_db_add():
         return jsonify({"ok": False, "error": "No data provided"}), 400
     
     # Validate required fields
-    required = ["device_id", "port_id"]
+    required = ["device_id", "console_ip", "port_id"]
     for field in required:
         if field not in body or not body[field]:
             return jsonify({"ok": False, "error": f"Missing required field: {field}"}), 400
@@ -1037,6 +1037,11 @@ def api_db_add():
     except ValueError:
         return jsonify({"ok": False, "error": "port_id must be a number"}), 400
     
+    # Validate console_ip ipv4
+    console_ip = body.get("console_ip", "")
+    if not (console_ip and is_valid_ipv4(console_ip)): 
+        return jsonify({"ok": False, "error": "missing/invalid console_ip!"}), 400
+
     # Create new device entry with only updatable fields + defaults
     new_device = {
         "device_id": body.get("device_id", ""),
@@ -1044,6 +1049,7 @@ def api_db_add():
         "model_name": body.get("model_name", ""),
         "hw_id": body.get("hw_id", ""),
         "mgmt_ip": "",  # Will be auto-discovered
+        "console_ip": console_ip,
         "port_id": str(port_id),
         "tag": "free",
         "current_user": "",
@@ -1061,7 +1067,7 @@ def api_db_add():
     try:
         if health_manager.ensure_ssh():
             with health_manager.ssh_lock:
-                res = telnet_and_run_show_serviceport(health_manager.ssh_client, PORT_OFFSET + port_id)
+                res = telnet_and_run_show_serviceport(health_manager.ssh_client, console_ip,  PORT_OFFSET + port_id)
                 if res and res.get("interface_status") == "up" and res.get("ip"):
                     ip_addr = res.get("ip")
                     if is_valid_ipv4(ip_addr):
@@ -1109,6 +1115,11 @@ def api_db_edit():
                 except ValueError:
                     return jsonify({"ok": False, "error": "port_id must be a number"}), 400
             
+            # Validate console_ip
+            console_ip = body.get("console_ip", "")
+            if not (console_ip and is_valid_ipv4(console_ip)):
+                return jsonify({"ok": False, "error": "missing/invalid console_ip!"}), 400
+
             if old_val != new_val:
                 d[field] = new_val
                 changes[field] = {"old": old_val, "new": new_val}
@@ -1120,12 +1131,12 @@ def api_db_edit():
     log_operation("EDIT", device_id, {"fields": changes})
     
     # If port_id changed, try to auto-discover mgmt_ip
-    if "port_id" in changes:
+    if "port_id" in changes or "console_ip" in changes:
         try:
             if health_manager.ensure_ssh():
                 with health_manager.ssh_lock:
-                    new_port = int(body.get("port_id", 0))
-                    res = telnet_and_run_show_serviceport(health_manager.ssh_client, PORT_OFFSET + new_port)
+                    console_ip = d.get("console_ip", 0); port_id = int(d.get("port_id", 0))
+                    res = telnet_and_run_show_serviceport(health_manager.ssh_client, console_ip, PORT_OFFSET + port_id)
                     if res and res.get("interface_status") == "up" and res.get("ip"):
                         ip_addr = res.get("ip")
                         if is_valid_ipv4(ip_addr):
@@ -1163,18 +1174,61 @@ def api_db_delete():
     
     return jsonify({"ok": True})
 
-@app.route("/api/db/console", methods=["POST"])
+@app.route("/api/db/console/ip", methods=["POST"])
+def api_db_console_ip():
+    """Update console port only (with validation)"""
+    body = request.get_json()
+    device_id = body.get("device_id")
+    console_ip = body.get("console_ip")
+    
+    if not device_id or console_ip is None:
+        return jsonify({"ok": False, "error": "device_id and console_ip required"}), 400
+    
+    if not (console_ip and is_valid_ipv4(console_ip)):
+        return jsonify({"ok": False, "error": "missing/invalid console_ip!"}), 400
+    
+    devices = read_devices_from_csv()
+    d = find_device(devices, device_id)
+    if not d:
+        return jsonify({"ok": False, "error": "device not found"}), 404
+    
+    old_ip= d.get("console_ip", "")
+    d["console_ip"] = console_ip
+    write_devices_to_csv(devices)
+    
+    log_operation("EDIT", device_id, {"field": "port_id", "old": old_ip, "new": console_ip})
+    
+    # Auto-discover mgmt_ip with new port
+    mgmt_discovered = None
+    port_id = int(d.get("port_id", ""))
+    try:
+        if health_manager.ensure_ssh():
+            with health_manager.ssh_lock:
+                res = telnet_and_run_show_serviceport(health_manager.ssh_client, console_ip, PORT_OFFSET + port_id)
+                if res and res.get("interface_status") == "up" and res.get("ip"):
+                    ip_addr = res.get("ip")
+                    if is_valid_ipv4(ip_addr):
+                        old_ip = d.get("mgmt_ip", "")
+                        d["mgmt_ip"] = ip_addr
+                        write_devices_to_csv(devices)
+                        log_operation("EDIT", device_id, {"field": "mgmt_ip", "old": old_ip, "new": ip_addr, "source": "auto-discover-on-port-change"})
+                        mgmt_discovered = ip_addr
+    except Exception as e:
+        print(f">>> $ Auto-discover failed for {device_id}: {e}")
+    
+    return jsonify({"ok": True, "mgmt_ip": mgmt_discovered})
+
+@app.route("/api/db/console/port", methods=["POST"])
 def api_db_console_port():
     """Update console port only (with validation)"""
     body = request.get_json()
     device_id = body.get("device_id")
-    port_id = body.get("port_id")
     
-    if not device_id or port_id is None:
-        return jsonify({"ok": False, "error": "device_id and port_id required"}), 400
+    if not device_id:
+        return jsonify({"ok": False, "error": "device_id required"}), 400
     
     try:
-        port_id = int(port_id)
+        port_id = int(body.get("port_id"))
         if port_id < 1 or port_id > 64:
             return jsonify({"ok": False, "error": "port_id must be between 1-64"}), 400
     except ValueError:
@@ -1193,10 +1247,11 @@ def api_db_console_port():
     
     # Auto-discover mgmt_ip with new port
     mgmt_discovered = None
+    console_ip = d.get("console_ip", "")
     try:
         if health_manager.ensure_ssh():
             with health_manager.ssh_lock:
-                res = telnet_and_run_show_serviceport(health_manager.ssh_client, PORT_OFFSET + port_id)
+                res = telnet_and_run_show_serviceport(health_manager.ssh_client, console_ip, PORT_OFFSET + port_id)
                 if res and res.get("interface_status") == "up" and res.get("ip"):
                     ip_addr = res.get("ip")
                     if is_valid_ipv4(ip_addr):
@@ -1236,13 +1291,14 @@ def kill_process_on_port(port):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Switch Reservation UI")
     parser.add_argument("--debug", action="store_true", default=False, help="Enable Flask debug mode")
+    parser.add_argument('-p', "--port", type=int, default=7000, help="Port number to run the server on")
     args = parser.parse_args()
 
     # 1. Kill any existing process on port 5000
-    kill_process_on_port(5000)
+    kill_process_on_port(args.port)
     
     # 2. Start background services
     start_background_services()
     
     # 3. Run Flask (use_reloader=False is safer for manual port management)
-    app.run(host="0.0.0.0", port=5000, debug=args.debug, use_reloader=False)
+    app.run(host="0.0.0.0", port=args.port, debug=args.debug, use_reloader=False)

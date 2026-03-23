@@ -328,7 +328,7 @@ def telnet_and_run_show_serviceport(ssh_client, console_ip, device_port, login_u
 
         int_status = None
         # If we did not get a prompt yet, try sending a newline to elicit it
-        if not re.search(r"\)[>#]\s*$", out):
+        if not re.search(r"\)\s?[>#]\s*$", out):
             int_status = "busy"
             # handle errors after telnet connection
             if re.search(r"hunt group busy", out, re.IGNORECASE) or re.search(r"Connection refused", out, re.IGNORECASE):
@@ -350,7 +350,7 @@ def telnet_and_run_show_serviceport(ssh_client, console_ip, device_port, login_u
                 print(f"[DEBUG] After second newline:\n{out!r}")
 
         # If we get a prompt, send the show command
-        if re.search(r"\)[>#]\s*$", out):
+        if re.search(r"\)\s?[>#]\s*$", out):
             if app.debug:
                 print("[DEBUG] CLI prompt detected, sending 'show serviceport'")
             chan.send("show serviceport\n")

@@ -227,7 +227,7 @@ class HealthManager(threading.Thread):
 health_manager = HealthManager(OfficeIP, SSH_USER, SSH_PASSWORD)
 
 # -----------------------
-# Telnet helpers (interact with console via singleton SSH client shell)
+# Telnet & SSH helpers (interact with console via singleton SSH client shell)
 # -------------------------------------------------------------------------------------------------
 
 def ssh_ping_once(ssh_client, mgmt_ip, count=2, timeout=6):
@@ -842,11 +842,11 @@ def api_reserve():
                 traceback.print_exc()
     
     if ok:
-        print(f">>> $ Hostname set to {new_name} for device {device_id}")
+        print(f">>> $ Hostname set to {new_name} for device: {device_id}")
         write_devices_to_csv(devices)
         log_operation("EDIT", device_id, {"field": "tag", "old": old_tag, "new": d["tag"], "user": user})
     else:
-        print(f">>> $ Hostname change to {new_name} failed for device {device_id}")
+        print(f">>> $ Hostname change to {new_name} failed for device: {device_id}")
     return jsonify({"ok": ok, "resv_end_time": d["resv_end_time"], "msg": msg})
 
 
@@ -1301,4 +1301,4 @@ if __name__ == "__main__":
     start_background_services()
     
     # 3. Run Flask (use_reloader=False is safer for manual port management)
-    app.run(host="0.0.0.0", port=args.port, debug=args.debug, use_reloader=False)
+    app.run(host="0.0.0.0", port=args.port, debug=args.debug, use_reloader=False, threaded=True)

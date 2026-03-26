@@ -15,8 +15,8 @@ const API = {
     dbConsolePort: '/api/db/console/port',
 };
 
-const POLL_INTERVAL_MS = 2000;
-const UPDATE_DEBOUNCE_MS = 180;
+const POLL_INTERVAL_MS = 1000;
+const UPDATE_DEBOUNCE_MS = 100;
 let PORT_OFFSET = 10000;
 const ROW_ID_PREFIX = 'row-';
 const UPDATABLE_FIELDS = ["device_id", "serial_no", "model_name", "hw_id", "console_ip", "port_id"];
@@ -184,6 +184,7 @@ function toggleTheme() {
 let prevDevices = new Map();
 let updateTimer = null;
 let isUpdating = false;
+let pendingPollForce = false; // If true, run another full poll after the current one
 
 function deviceKey(d) {
     return JSON.stringify({
@@ -202,6 +203,14 @@ function deviceKey(d) {
 
 function tbody() {
     return document.querySelector('#devices_table tbody');
+}
+
+/** Focus is on an interactive control in this row — avoid rebuilding reservation/actions DOM (stops caret jumping on poll). */
+function rowHasInteractiveFocus(tr) {
+    const ae = document.activeElement;
+    if (!ae || !tr.contains(ae)) return false;
+    const t = ae.tagName;
+    return t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || t === 'BUTTON';
 }
 
 /* =========================
@@ -436,6 +445,14 @@ function setStatusSpanForTag(span, tag) {
     span.innerText = t === 'free' ? 'Free' : (t === 'resv' ? 'Reserved' : (t === 'static' ? 'Static' : String(tag || '')));
 }
 
+/** data-editing can stick on <td> while innerHTML shows reserved <pre>; only block updates when the free-row form exists or an input here is focused. */
+function reservationCellIsActivelyEditing(tdResv) {
+    if (!tdResv) return false;
+    if (tdResv.querySelector('input:focus')) return true;
+    if (tdResv.getAttribute('data-editing') !== '1') return false;
+    return !!tdResv.querySelector('.resv-container');
+}
+
 /* =========================
  * 9. Reservation & Actions Setup
  * ========================= */
@@ -443,11 +460,11 @@ function setupReservationAndActions(tr, d) {
     const cells = tr.cells;
     const tdResv = cells[8];
     const tdActions = cells[9];
-    const isEditing = tdResv.querySelector('input:focus') != null || tdResv.getAttribute('data-editing') === '1';
-    if (isEditing) return;
+    if (!tdResv || !tdActions) return;
+    if (reservationCellIsActivelyEditing(tdResv)) return;
     tdResv.innerHTML = '';
     tdActions.innerHTML = '';
-    const tag = (d.tag || 'free').toLowerCase();
+    const tag = String(d.tag || 'free').trim().toLowerCase();
     const actionsWrap = tdActions.querySelector('.actions-wrap') || tdActions;
     actionsWrap.innerHTML = '';
     
@@ -496,12 +513,13 @@ function setupReservationAndActions(tr, d) {
                     const toastType = r.ok ? 'success' : 'error';
                     showToast('Reserve', `Reservation: ${r.msg || '?'}`, { type: toastType, autohide: 2500 });
                 }
-                pollAndUpdate(true);
             } catch (err) {
                 showToast('Error', 'Reserve failed', { type: 'error', autohide: 3500 });
             } finally {
                 tdResv.removeAttribute('data-editing');
             }
+            // Refresh after clearing data-editing.
+            pollAndUpdate(true).catch(e => console.error(e));
         };
         actionsWrap.appendChild(reserveBtn);
     } else {
@@ -515,15 +533,30 @@ function setupReservationAndActions(tr, d) {
         // Release button
         const releaseBtn = ce('button', { class: 'btn btn-sm action-release', text: 'RELEASE' });
         releaseBtn.onclick = async () => {
+            const deviceId = d.device_id;
             try {
-                const r = await postJSON(API.release, { device_id: d.device_id });
+                const r = await postJSON(API.release, { device_id: deviceId });
                 if (r && (r.ok || r.status === 'success')) {
                     showToast('Release', 'Device released successfully', { type: 'success', autohide: 2500 });
                 }
-                pollAndUpdate(true);
             } catch (err) {
                 showToast('Error', 'Release failed', { type: 'error', autohide: 3500 });
+                return;
             }
+            // Drop focus so updateRow does not skip the free-state rebuild (focus often stays on RELEASE).
+            try {
+                if (document.activeElement && document.body.contains(document.activeElement)) {
+                    document.activeElement.blur();
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                const devices = await fetchDevices();
+                const fresh = devices.find(x => String(x.device_id) === String(deviceId));
+                if (fresh) updateRow(fresh);
+            } catch (e) {
+                console.error(e);
+            }
+            pollAndUpdate(true).catch(e => console.error(e));
         };
         actionsWrap.appendChild(releaseBtn);
     }
@@ -626,8 +659,9 @@ function updateRow(d) {
         const portRow = cells[5].querySelector('.console-port-row');
         let copyBtn = cells[5].querySelector('.console-copy-btn');
         const portNum = parseInt(String(d.port_id || ''), 0);
+        const showCopy = !!(d.console_ip && d.port_id && !Number.isNaN(portNum) && portNum > 0);
+        const telnet = showCopy ? `telnet ${d.console_ip} ${PORT_OFFSET + portNum}` : '';
         if (showCopy) {
-            const telnet = `telnet ${d.console_ip} ${PORT_OFFSET + portNum}`;
             if (!copyBtn && portRow) {
                 copyBtn = ce('button', { type: 'button', class: 'icon-only console-copy-btn', title: telnet }, '⧉');
                 copyBtn.addEventListener('click', () => {
@@ -636,7 +670,7 @@ function updateRow(d) {
                 });
                 portRow.appendChild(copyBtn);
                 bootstrapifyButtons(portRow);
-            } else if (copyBtn) copyBtn.title = telnetTitle;
+            } else if (copyBtn) copyBtn.title = telnet;
         } else if (copyBtn) copyBtn.remove();
     }
     
@@ -665,9 +699,26 @@ function updateRow(d) {
     
     // 8 & 9: reservation + actions
     const tdResv = cells[8];
-    const isEditing = tdResv && (tdResv.querySelector('input:focus') != null || tdResv.getAttribute('data-editing') === '1');
-    if (!isEditing) {
-        setupReservationAndActions(tr, d);
+    const tdActions = cells[9];
+    if (!tdResv || !tdActions) return;
+    if (!reservationCellIsActivelyEditing(tdResv)) {
+        const srvTag = String(d.tag || 'free').trim().toLowerCase();
+        const domFreeForm = !!tdResv.querySelector('.resv-container');
+        const domShowsReservedChrome = !!(tdResv.querySelector('pre')) || !!tr.querySelector('.action-release');
+        const serverSaysFree = srvTag === 'free';
+        const structureMismatch =
+            (serverSaysFree && domShowsReservedChrome) || (!serverSaysFree && domFreeForm);
+
+        if (structureMismatch) {
+            setupReservationAndActions(tr, d);
+        } else if (rowHasInteractiveFocus(tr)) {
+            const pre = tdResv.querySelector('pre');
+            if ((srvTag === 'resv' || srvTag === 'static') && pre) {
+                pre.textContent = d.resv_block || (srvTag === 'static' ? 'Static assignment' : '');
+            }
+        } else {
+            setupReservationAndActions(tr, d);
+        }
     }
 }
 
@@ -693,7 +744,10 @@ function scheduleUpdate(force = false) {
 }
 
 async function pollAndUpdate(force = false) {
-    if (isUpdating) return;
+    if (isUpdating) {
+        if (force) pendingPollForce = true;
+        return;
+    }
     isUpdating = true;
     try {
         const devices = await fetchDevices();
@@ -725,6 +779,10 @@ async function pollAndUpdate(force = false) {
         });
     } finally {
         isUpdating = false;
+        if (pendingPollForce) {
+            pendingPollForce = false;
+            Promise.resolve().then(() => pollAndUpdate(true).catch(e => console.error(e)));
+        }
     }
 }
 

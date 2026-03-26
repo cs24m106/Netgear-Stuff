@@ -20,6 +20,13 @@ const UPDATE_DEBOUNCE_MS = 100;
 let PORT_OFFSET = 10000;
 const ROW_ID_PREFIX = 'row-';
 const UPDATABLE_FIELDS = ["device_id", "serial_no", "model_name", "hw_id", "console_ip", "port_id"];
+const FILTER_DEFS = {
+    model: { inputId: 'filterModelInput', toggleId: 'filterModelToggle', clearId: 'clearFilterModel', listId: 'filterModelList' },
+    hardware: { inputId: 'filterHardwareInput', toggleId: 'filterHardwareToggle', clearId: 'clearFilterHardware', listId: 'filterHardwareList' }
+};
+const filterState = { model: '', hardware: '' };
+let filterEls = null;
+const filterOptionsCache = { model: [], hardware: [] };
 
 /* =========================
  * 2. Utility Helpers
@@ -152,7 +159,7 @@ function bootstrapifyButtons(root) {
 }
 
 /* =========================
- * 5. Theme Toggle
+ * 5A. Table Theme Toggle
  * ========================= */
 const THEME_KEY = 'switchmgr.theme';
 
@@ -177,6 +184,236 @@ function toggleTheme() {
         if (btn) btn.addEventListener('click', toggleTheme);
     } catch (e) {}
 })();
+
+/* =========================
+ * 5B. Table Filters
+ * ========================= */
+function normalizeFilterValue(val) {
+    return String(val || '').trim().toLowerCase();
+}
+
+function getFilterElements() {
+    if (filterEls) return filterEls;
+    filterEls = {
+        modelInput: document.getElementById(FILTER_DEFS.model.inputId),
+        modelToggle: document.getElementById(FILTER_DEFS.model.toggleId),
+        modelClear: document.getElementById(FILTER_DEFS.model.clearId),
+        modelList: document.getElementById(FILTER_DEFS.model.listId),
+        hardwareInput: document.getElementById(FILTER_DEFS.hardware.inputId),
+        hardwareToggle: document.getElementById(FILTER_DEFS.hardware.toggleId),
+        hardwareClear: document.getElementById(FILTER_DEFS.hardware.clearId),
+        hardwareList: document.getElementById(FILTER_DEFS.hardware.listId)
+    };
+    return filterEls;
+}
+
+function refreshFilterStateFromUi() {
+    const els = getFilterElements();
+    if (!els.modelInput || !els.hardwareInput) return;
+    filterState.model = normalizeFilterValue(els.modelInput.value);
+    filterState.hardware = normalizeFilterValue(els.hardwareInput.value);
+    updateFilterClearState();
+}
+
+function updateFilterClearState() {
+    const els = getFilterElements();
+    if (els.modelClear) els.modelClear.disabled = !filterState.model;
+    if (els.hardwareClear) els.hardwareClear.disabled = !filterState.hardware;
+}
+
+function closeFilterDropdown(kind) {
+    const els = getFilterElements();
+    if (kind === 'model') {
+        if (els.modelList) els.modelList.hidden = true;
+        if (els.modelToggle) els.modelToggle.setAttribute('aria-expanded', 'false');
+    } else {
+        if (els.hardwareList) els.hardwareList.hidden = true;
+        if (els.hardwareToggle) els.hardwareToggle.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function closeAllFilterDropdowns() {
+    closeFilterDropdown('model');
+    closeFilterDropdown('hardware');
+}
+
+function populateFilterDropdownList(kind) {
+    const els = getFilterElements();
+    const ul = kind === 'model' ? els.modelList : els.hardwareList;
+    const input = kind === 'model' ? els.modelInput : els.hardwareInput;
+    if (!ul) return;
+    const all = filterOptionsCache[kind] || [];
+    const q = normalizeFilterValue(input ? input.value : '');
+    const filtered = q
+        ? all.filter(v => normalizeFilterValue(v).includes(q))
+        : all.slice();
+    ul.innerHTML = '';
+    filtered.forEach(val => {
+        const li = ce('li', { role: 'option', text: val });
+        li.addEventListener('mousedown', (e) => { e.preventDefault(); });
+        li.addEventListener('click', () => selectFilterOption(kind, val));
+        ul.appendChild(li);
+    });
+}
+
+function selectFilterOption(kind, val) {
+    const els = getFilterElements();
+    const input = kind === 'model' ? els.modelInput : els.hardwareInput;
+    if (input) input.value = val;
+    closeFilterDropdown(kind);
+    refreshFilterStateFromUi();
+    applyFilters();
+}
+
+function toggleFilterDropdown(kind) {
+    const els = getFilterElements();
+    const list = kind === 'model' ? els.modelList : els.hardwareList;
+    const toggle = kind === 'model' ? els.modelToggle : els.hardwareToggle;
+    const other = kind === 'model' ? 'hardware' : 'model';
+    if (!list || !toggle) return;
+    const isOpen = !list.hidden;
+    if (isOpen) {
+        closeFilterDropdown(kind);
+        return;
+    }
+    closeFilterDropdown(other);
+    populateFilterDropdownList(kind);
+    list.hidden = false;
+    toggle.setAttribute('aria-expanded', 'true');
+}
+
+function commonPrefixInsensitive(values) {
+    if (!values || values.length === 0) return '';
+    let prefix = values[0];
+    for (let i = 1; i < values.length; i++) {
+        const s = values[i];
+        let j = 0;
+        const max = Math.min(prefix.length, s.length);
+        while (j < max && prefix[j].toLowerCase() === s[j].toLowerCase()) j++;
+        prefix = prefix.slice(0, j);
+        if (!prefix) break;
+    }
+    return prefix;
+}
+
+function tryAutoFillInput(kind, input, ev) {
+    if (!input) return;
+    const raw = input.value || '';
+    if (!raw) return;
+    if (input.selectionStart == null || input.selectionEnd == null) return;
+    const caretAtEnd = input.selectionStart === input.selectionEnd && input.selectionEnd === raw.length;
+    if (!caretAtEnd) return;
+    if (ev && ev.inputType && ev.inputType.startsWith('delete')) return;
+    const options = filterOptionsCache[kind] || [];
+    if (options.length === 0) return;
+    const matches = options.filter(v => normalizeFilterValue(v).includes(normalizeFilterValue(raw)));
+    const prefix = commonPrefixInsensitive(matches);
+    if (!prefix) return;
+    const rawNorm = normalizeFilterValue(raw);
+    const prefixNorm = normalizeFilterValue(prefix);
+    if (!prefixNorm.startsWith(rawNorm)) return;
+    if (prefix.length <= raw.length) return;
+    input.value = prefix;
+    input.setSelectionRange(raw.length, prefix.length);
+}
+
+function syncFilterOptions(devices) {
+    const els = getFilterElements();
+    if (!els.modelInput || !els.hardwareInput) return;
+    const modelVals = new Set();
+    const hwVals = new Set();
+    (devices || []).forEach(d => {
+        const model = String(d.model_name || '').trim();
+        const hw = String(d.hw_id || '').trim();
+        if (model) modelVals.add(model);
+        if (hw) hwVals.add(hw);
+    });
+    filterOptionsCache.model = Array.from(modelVals).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    filterOptionsCache.hardware = Array.from(hwVals).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    if (els.modelList && !els.modelList.hidden) populateFilterDropdownList('model');
+    if (els.hardwareList && !els.hardwareList.hidden) populateFilterDropdownList('hardware');
+    refreshFilterStateFromUi();
+}
+
+function applyFilters() {
+    const modelQ = filterState.model;
+    const hwQ = filterState.hardware;
+    const tb = tbody();
+    if (!tb) return;
+    tb.querySelectorAll('tr').forEach(row => {
+        if (!row.id || !row.id.startsWith(ROW_ID_PREFIX)) return;
+        const rowModel = normalizeFilterValue(row.cells[1] ? row.cells[1].innerText : '');
+        const rowHw = normalizeFilterValue(row.cells[2] ? row.cells[2].innerText : '');
+        const matchesModel = !modelQ || rowModel.includes(modelQ);
+        const matchesHw = !hwQ || rowHw.includes(hwQ);
+        row.style.display = (matchesModel && matchesHw) ? '' : 'none';
+    });
+}
+
+function onFilterTextInput(kind, ev) {
+    const els = getFilterElements();
+    const input = kind === 'model' ? els.modelInput : els.hardwareInput;
+    const list = kind === 'model' ? els.modelList : els.hardwareList;
+    refreshFilterStateFromUi();
+    applyFilters();
+    const before = input ? input.value : '';
+    tryAutoFillInput(kind, input, ev);
+    if (input && input.value !== before) {
+        refreshFilterStateFromUi();
+        applyFilters();
+    }
+    if (list && !list.hidden) populateFilterDropdownList(kind);
+}
+
+function initFilters() {
+    const els = getFilterElements();
+    if (!els.modelInput || !els.hardwareInput) return;
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.filter-combo')) return;
+        closeAllFilterDropdowns();
+    });
+    if (els.modelToggle) {
+        els.modelToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleFilterDropdown('model');
+        });
+    }
+    if (els.hardwareToggle) {
+        els.hardwareToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleFilterDropdown('hardware');
+        });
+    }
+    els.modelInput.addEventListener('input', (ev) => onFilterTextInput('model', ev));
+    els.hardwareInput.addEventListener('input', (ev) => onFilterTextInput('hardware', ev));
+    function onFilterKeydown(kind, e) {
+        if (e.key === 'Escape') {
+            e.stopPropagation();
+            closeFilterDropdown(kind);
+        }
+    }
+    els.modelInput.addEventListener('keydown', (e) => onFilterKeydown('model', e));
+    els.hardwareInput.addEventListener('keydown', (e) => onFilterKeydown('hardware', e));
+    if (els.modelClear) {
+        els.modelClear.addEventListener('click', (e) => {
+            e.stopPropagation();
+            els.modelInput.value = '';
+            closeFilterDropdown('model');
+            refreshFilterStateFromUi();
+            applyFilters();
+        });
+    }
+    if (els.hardwareClear) {
+        els.hardwareClear.addEventListener('click', (e) => {
+            e.stopPropagation();
+            els.hardwareInput.value = '';
+            closeFilterDropdown('hardware');
+            refreshFilterStateFromUi();
+            applyFilters();
+        });
+    }
+    refreshFilterStateFromUi();
+}
 
 /* =========================
  * 6. Core Update Logic
@@ -400,7 +637,7 @@ function createRowForDevice(d) {
     (async function populateConfig(mgmt_ip, port_id) {
         if (!mgmt_ip || mgmt_ip === '-' || mgmt_ip === '—.—.—.—') return;
         try {
-            const cfg = await postJSON(API.config, { mgmt_ip, port_id });
+            const cfg = await postJSON(API.config, {mgmt_ip});
             if (!cfg) return;
             const uiStack = tdUI.querySelector('.ui-stack');
             uiStack.innerHTML = '';
@@ -777,6 +1014,8 @@ async function pollAndUpdate(force = false) {
                 prevDevices.delete(rid);
             }
         });
+        syncFilterOptions(devices);
+        applyFilters();
     } finally {
         isUpdating = false;
         if (pendingPollForce) {
@@ -1030,6 +1269,7 @@ window.addEventListener('load', () => {
         container.appendChild(addBtnContainer);
     }
     
+    initFilters();
     startPolling();
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') scheduleUpdate(true);

@@ -38,13 +38,37 @@
         <thead>
           <tr>
             <th class="col-left word-wrap" style="width: 8%;">Id</th>
-            <th class="col-left word-wrap" style="width: 12%;">Model</th>
-            <th class="col-left word-wrap" style="width: 8%;">Hardware</th>
-            <th class="col-center" style="width: 8%;">UI</th>
+            <th class="col-left word-wrap th-filter-col" style="width: 12%;">
+              <div class="th-filter-head">
+                <span class="th-filter-title">Model</span>
+                <div class="filter-combo" data-filter-kind="model">
+                  <div class="filter-combo-row">
+                    <input type="text" id="filterModelInput" class="filter-combo-input" placeholder="all" autocomplete="off" aria-label="Filter by model" />
+                    <button type="button" id="filterModelToggle" class="filter-combo-toggle" aria-label="Show model options" aria-expanded="false" title="Options">▾</button>
+                    <button type="button" id="clearFilterModel" class="filter-clear" aria-label="Clear model filter">×</button>
+                  </div>
+                  <ul id="filterModelList" class="filter-combo-list" hidden role="listbox"></ul>
+                </div>
+              </div>
+            </th>
+            <th class="col-left word-wrap th-filter-col" style="width: 10%;">
+              <div class="th-filter-head">
+                <span class="th-filter-title">HW</span>
+                <div class="filter-combo" data-filter-kind="hardware">
+                  <div class="filter-combo-row">
+                    <input type="text" id="filterHardwareInput" class="filter-combo-input" placeholder="all" autocomplete="off" aria-label="Filter by hardware" />
+                    <button type="button" id="filterHardwareToggle" class="filter-combo-toggle" aria-label="Show hardware options" aria-expanded="false" title="Options">▾</button>
+                    <button type="button" id="clearFilterHardware" class="filter-clear" aria-label="Clear hardware filter">×</button>
+                  </div>
+                  <ul id="filterHardwareList" class="filter-combo-list" hidden role="listbox"></ul>
+                </div>
+              </div>
+            </th>
+            <th class="col-center" style="width: 7%;">UI</th>
             <th class="col-left" style="width: 12%;">Mgmt-Ip</th>
             <th class="col-left" style="width: 9%;">Console</th> 
             <th class="col-left" style="width: 5%;">Health</th>       
-            <th class="col-center" style="width: 6%;">Status</th>     
+            <th class="col-center" style="width: 5%;">Status</th>     
             <th class="col-left" style="width: 24%;">Reservation</th> 
             <th class="col-center" style="width: 8%;">Actions</th>
           </tr>

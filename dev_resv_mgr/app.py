@@ -746,16 +746,9 @@ def api_devices():
 def api_config():
     data = request.get_json()
     mgmt_ip = data.get("mgmt_ip")
-    console_ip = data.get("console_ip")
     if not mgmt_ip:
         return jsonify({"error":"mgmt_ip required"}), 400
     
-    port_id = 0
-    try:
-        port_id = int(data.get("port_id"))
-    except Exception as e:
-        return jsonify({"error":e}), 400
-
     # Extract last octet (e.g., 192.168.1.55 -> 55)
     last_octet = int(mgmt_ip.strip().split(".")[-1])
     

@@ -2,7 +2,7 @@ import time, datetime
 import os, threading, csv, json
 import ipaddress, socket, subprocess
 from filelock import FileLock
-from flask import Flask, jsonify, request, render_template, send_from_directory
+from flask import Flask, jsonify, request, render_template, send_from_directory, g
 import paramiko, re
 import traceback, argparse
 
@@ -58,8 +58,7 @@ def read_devices_from_csv():
         with open(CSV_PATH, newline='') as f:
             reader = csv.DictReader(f)
             for r in reader:
-                if not r.get("tag"):
-                    r["tag"] = "free"
+                if not r.get("tag"): r["tag"] = "free"
                 devices.append(r)
     return devices
 
@@ -77,27 +76,60 @@ def write_devices_to_csv(devices):
 
 def find_device(devices, device_id):
     for d in devices:
-        if d["device_id"] == device_id:
-            return d
+        if d["device_id"] == device_id: return d
     return None
 
 def log_operation(operation, device_id, changes, user="system"):
     """
     Log all database operations for audit/revert capability.
-    Format: TIMESTAMP | OPERATION | DEVICE_ID | CHANGES | USER
+    operation: ADD, EDIT, DELETE, or LOG (structured app/audit messages).
+    Format: JSON lines with timestamp, operation, device_id, changes, user.
     """
     lock = FileLock(LOG_LOCK_PATH, timeout=10)
     with lock:
         timestamp = datetime.datetime.utcnow().isoformat()
         log_entry = {
             "timestamp": timestamp,
-            "operation": operation,  # ADD, EDIT, DELETE
+            "operation": operation,
             "device_id": device_id,
             "changes": changes,
             "user": user
         }
         with open(LOG_PATH, "a", newline='') as f:
             f.write(json.dumps(log_entry) + "\n")
+
+
+LOG_LEVELS = frozenset({"INFO", "WARNING", "ERROR"})
+
+
+def log_application(level, message, device_id="-", user="system", **extra):
+    """
+    Operation type LOG with level in changes: INFO, WARNING, or ERROR.
+    message is human-readable; extra keys are merged into changes for querying.
+    """
+    lvl = (level or "INFO").upper()
+    if lvl not in LOG_LEVELS:
+        lvl = "INFO"
+    changes = {"level": lvl, "message": message}
+    if extra:
+        changes.update(extra)
+    log_operation("LOG", device_id, changes, user=user)
+
+
+def reservation_actor_user(body=None, device_row=None):
+    """
+    Username for reservation-related audit lines: POST 'user' if present and non-empty,
+    else the device's current_user. Used as operations.log top-level 'user' for filtering.
+    """
+    if body:
+        u = body.get("user")
+        if u is not None and str(u).strip():
+            return str(u).strip()
+    if device_row:
+        u = (device_row.get("current_user") or "").strip()
+        if u: return u
+    return "system"
+
 
 # -----------------------
 # Health manager (single SSH session -> sequential pings)
@@ -110,10 +142,10 @@ def init_device_state_from_csv():
             did = d["device_id"]
             if did not in device_state:
                 device_state[did] = {
-                    "health": "unk",
-                    "retry_count": 0,
+                    "health": "unk", "retry_count": 0,
                     "next_check_ts": time.time() + 1
                 }
+    log_application("INFO", "[INFO] device_state initialized from CSV", extra={"device_count": len(devices)})
 
 class HealthManager(threading.Thread):
     def __init__(self, officeIP, ssh_user, ssh_password):
@@ -135,9 +167,17 @@ class HealthManager(threading.Thread):
                 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 client.connect(self.officeIP, username=self.ssh_user, password=self.ssh_password, timeout=10)
                 self.ssh_client = client
+                log_application(
+                    "INFO", f"[INFO] HealthManager SSH connected to {self.officeIP}",
+                    extra={"component": "health", "host": self.officeIP},
+                )
                 return True
-            except Exception:
+            except Exception as e:
                 self.ssh_client = None
+                log_application(
+                    "WARNING", f"[WARNING] HealthManager SSH connect failed: {self.officeIP}",
+                    extra={"component": "health", "host": self.officeIP, "error": str(e)},
+                )
                 return False
 
     def close_ssh(self):
@@ -153,6 +193,10 @@ class HealthManager(threading.Thread):
             return
 
         if not self.ensure_ssh():
+            log_application(
+                "WARNING", "[WARNING] health check cycle: SSH unavailable; marking candidates down",
+                extra={"component": "health", "device_ids": [d[0] for d in check_list]},
+            )
             for device_id, mgmt_ip in check_list:
                 with device_state_lock:
                     st = device_state.get(device_id)
@@ -163,13 +207,21 @@ class HealthManager(threading.Thread):
                     st["next_check_ts"] = time.time() + DOWN_HEALTH_TIMER
             return
 
+        log_application(
+            "INFO",f"[INFO] health check cycle: pinging {len(check_list)} device(s)",
+            extra={"component": "health", "checks": [{"device_id": did, "mgmt_ip": mip} for did, mip in check_list]},
+        )
         with self.ssh_lock:
             client = self.ssh_client
             for device_id, mgmt_ip in check_list:
                 try:
                     ok = ssh_ping_once(client, mgmt_ip)
-                except Exception:
+                except Exception as e:
                     ok = False
+                    log_application(
+                        "ERROR", f"[ERROR] health ping exception device_id={device_id} mgmt={mgmt_ip}",
+                        device_id=device_id, extra={"component": "health", "mgmt_ip": mgmt_ip, "error": str(e)},
+                    )
                 with device_state_lock:
                     st = device_state.get(device_id)
                     if not st:
@@ -178,6 +230,10 @@ class HealthManager(threading.Thread):
                         st["health"] = "up"
                         st["retry_count"] = 0
                         st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+                        log_application(
+                            "INFO", f"[INFO] health result UP (ping ok) mgmt={mgmt_ip}",
+                            device_id=device_id, extra={"component": "health", "mgmt_ip": mgmt_ip},
+                        )
                     else:
                         st["retry_count"] += 1
                         st["health"] = "down"
@@ -185,8 +241,14 @@ class HealthManager(threading.Thread):
                             st["next_check_ts"] = time.time() + DOWN_HEALTH_TIMER
                         else:
                             st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+                        lvl = "WARNING" if st["retry_count"] >= MAX_HEALTH_CHECK_RETRIES else "INFO"
+                        log_application(
+                            lvl, f"[{lvl}] health result DOWN mgmt={mgmt_ip} retry_count={st['retry_count']}",
+                            device_id=device_id, extra={"component": "health", "mgmt_ip": mgmt_ip, "retry_count": st["retry_count"]},
+                        )
 
     def run(self):
+        log_application("INFO", "[INFO] HealthManager thread started", extra={"component": "health"})
         while self.keep_running:
             try:
                 now = time.time()
@@ -212,11 +274,19 @@ class HealthManager(threading.Thread):
                                     st["health"] = "unk"
                                     st["retry_count"] = 0
                                     st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+                            log_application(
+                                "INFO", f"[INFO] health skip (no valid mgmt_ip); state set unk",
+                                device_id=did, extra={"component": "health", "mgmt_ip": mgmt},
+                            )
                     self.run_one_cycle(to_ping)
                 else:
                     time.sleep(0.5) # sleep half sec when check list is empty
-            except Exception:
+            except Exception as e:
                 traceback.print_exc()
+                log_application(
+                    "ERROR", f"[ERROR] HealthManager.run loop exception: {e}",
+                    extra={"component": "health"},
+                )
                 self.close_ssh()
                 time.sleep(self.reconnect_backoff)
 
@@ -261,11 +331,9 @@ def _read_channel_until(channel, timeout_sec=1, stop_patterns=None):
                 s = buf.decode(errors="ignore")
                 for pat in stop_patterns:
                     if isinstance(pat, bytes):
-                        if pat in buf:
-                            return s
+                        if pat in buf: return s
                     else:
-                        if pat in s:
-                            return s
+                        if pat in s: return s
             else:
                 time.sleep(0.01)
     except Exception:
@@ -427,10 +495,7 @@ def ssh_and_set_hostname(ssh_client, mgmt_ip, new_hostname, serial_no='', login_
     Use the existing ssh_client (connected to the PI/console) and from that shell run:
         ssh {login_user}@{mgmt_ip}
     Then perform:
-        en
-        hostname {new_hostname}
-        logout
-
+        en; hostname {new_hostname}; logout
     Returns True if the hostname change is detected (prompt contains new_hostname# or (new_hostname)#), False otherwise.
     """
     try:
@@ -597,6 +662,7 @@ class ReservationMonitor(threading.Thread):
         self.keep_running = True
 
     def run(self):
+        log_application("INFO", "[INFO] ReservationMonitor thread started", extra={"component": "reservation_monitor"})
         while self.keep_running:
             try:
                 # 1. Read Database
@@ -611,7 +677,21 @@ class ReservationMonitor(threading.Thread):
                         end_dt = datetime.datetime.fromisoformat(end_str)
                         # Buffer of 1 second to ensure we don't race with the very last second of display
                         if now >= end_dt:
-                            print(f">>> $ [Auto-Release] Expired reservation for {d['device_id']}. Releasing...")
+                            did = d["device_id"]
+                            old_tag = d.get("tag") or "resv"
+                            resv_user = (d.get("current_user") or "").strip() or "system"
+                            print(f">>> $ [Auto-Release] Expired reservation for {did}. Releasing...")
+                            log_application(
+                                "INFO",
+                                f"[INFO] auto-release: reservation expired for device_id={did}",
+                                device_id=did,
+                                user=resv_user,
+                                extra={
+                                    "component": "reservation_monitor",
+                                    "subsystem": "reservation",
+                                    "resv_end_time": end_str,
+                                },
+                            )
 
                             # Capture model_name
                             model_name = (d.get("model_name") or "").strip()
@@ -623,6 +703,11 @@ class ReservationMonitor(threading.Thread):
                             d["duration"] = ""
                             d["resv_end_time"] = ""
                             dirty = True
+                            log_operation(
+                                "EDIT", did,
+                                {"field": "tag", "old": old_tag, "new": "free", "source": "auto-release"},
+                                user=resv_user,
+                            )
 
                             # Best-effort: restore hostname on physical switch back to model_name
                             # Use the singleton SSH client guarded by health_manager.ssh_lock
@@ -632,20 +717,71 @@ class ReservationMonitor(threading.Thread):
                                         try:
                                             ok, msg = ssh_and_set_hostname(health_manager.ssh_client, mgmt, model_name)
                                             if ok:
-                                                print(f">>> $ Hostname restored to {model_name} for device {d['device_id']} (auto-release).")
+                                                print(f">>> $ Hostname restored to {model_name} for device {did} (auto-release).")
+                                                log_application(
+                                                    "INFO", f"[INFO] auto-release: hostname restored to {model_name!r}",
+                                                    device_id=did, user=resv_user,
+                                                    extra={
+                                                        "component": "reservation_monitor",
+                                                        "subsystem": "reservation",
+                                                        "mgmt_ip": mgmt,
+                                                    },
+                                                )
                                             else:
-                                                print(f">>> $ Hostname restore to {model_name} failed for device {d['device_id']} (auto-release). Reason: {msg}")
-                                        except Exception:
+                                                print(f">>> $ Hostname restore to {model_name} failed for device {did} (auto-release). Reason: {msg}")
+                                                log_application(
+                                                    "WARNING", f"[WARNING] auto-release: hostname restore failed: {msg}",
+                                                    device_id=did, user=resv_user,
+                                                    extra={
+                                                        "component": "reservation_monitor",
+                                                        "subsystem": "reservation",
+                                                        "model_name": model_name,
+                                                        "mgmt_ip": mgmt,
+                                                    },
+                                                )
+                                        except Exception as e:
                                             traceback.print_exc()
+                                            log_application(
+                                                "ERROR", f"[ERROR] auto-release: hostname restore exception: {e}",
+                                                device_id=did, user=resv_user,
+                                                extra={"component": "reservation_monitor", "subsystem": "reservation"},
+                                            )
                                 else:
-                                    print(f">>> $ Could not open SSH to LAB to restore hostname for device {d['device_id']}.")
+                                    print(f">>> $ Could not open SSH to LAB to restore hostname for device {did}.")
+                                    log_application(
+                                        "WARNING", "[WARNING] auto-release: SSH to lab unavailable; hostname not restored",
+                                        device_id=did, user=resv_user,
+                                        extra={"component": "reservation_monitor", "subsystem": "reservation"},
+                                    )
+                            elif not mgmt or not model_name:
+                                log_application(
+                                    "WARNING", "[WARNING] auto-release: skipped hostname restore (missing mgmt_ip or model_name)",
+                                    device_id=did,
+                                    user=resv_user,
+                                    extra={
+                                        "component": "reservation_monitor",
+                                        "subsystem": "reservation",
+                                        "has_mgmt": bool(mgmt),
+                                        "has_model": bool(model_name),
+                                    },
+                                )
                 
                 # 3. Save if changes made
                 if dirty:
                     write_devices_to_csv(devices)
+                    log_application(
+                        "INFO", "[INFO] auto-release: CSV updated after expirations",
+                        user="system",
+                        extra={"component": "reservation_monitor", "subsystem": "reservation"},
+                    )
                 
-            except Exception:
+            except Exception as e:
                 traceback.print_exc()
+                log_application(
+                    "ERROR",
+                    f"[ERROR] ReservationMonitor loop exception: {e}",
+                    extra={"component": "reservation_monitor"},
+                )
             # Check every 5 seconds to reduce I/O load (Backoff on error)
             time.sleep(5) 
 
@@ -656,6 +792,47 @@ reservation_monitor = ReservationMonitor()
 # Flask app + API
 # -------------------------------------------------------------------------------------------------
 app = Flask(__name__, static_folder="static", template_folder="templates")
+http_ignore_api_logs = ["/api/devices", "/api/config"]
+
+@app.before_request
+def _log_http_request_start():
+    if request.path in http_ignore_api_logs: return
+    g._req_started = time.time()
+    log_application(
+        "INFO", f"[INFO] {request.method}: {request.path}",
+        extra={"component": "http", "http_method": request.method, "path": request.path, "phase": "request"},
+    )
+
+
+@app.after_request
+def _log_http_request_end(response):
+    if request.path in http_ignore_api_logs: return response
+    elapsed_ms = None
+    if getattr(g, "_req_started", None) is not None:
+        elapsed_ms = round((time.time() - g._req_started) * 1000, 2)
+    code = response.status_code if response is not None else 0
+    if code >= 500:
+        lvl = "ERROR"
+    elif code >= 400:
+        lvl = "WARNING"
+    else:
+        lvl = "INFO"
+    extra = {
+        "component": "http",
+        "http_method": request.method,
+        "path": request.path,
+        "status_code": code,
+        "phase": "response",
+    }
+    if elapsed_ms is not None:
+        extra["elapsed_ms"] = elapsed_ms
+    log_application(
+        lvl,
+        f"[{lvl}] {request.method}: {request.path} -> {code}",
+        extra=extra,
+    )
+    return response
+
 
 @app.route("/")
 def index():
@@ -719,6 +896,7 @@ def format_reservation_block(d):
 @app.route("/api/devices", methods=["GET"])
 def api_devices():
     devices = read_devices_from_csv()
+    #log_application("INFO", "[INFO] api_devices: building device list", extra={"component": "api", "count": len(devices)})
     now = datetime.datetime.utcnow()
     output = []
     with device_state_lock:
@@ -747,6 +925,7 @@ def api_config():
     data = request.get_json()
     mgmt_ip = data.get("mgmt_ip")
     if not mgmt_ip:
+        log_application("WARNING", "[WARNING] api_config: mgmt_ip missing", extra={"component": "api"})
         return jsonify({"error":"mgmt_ip required"}), 400
     
     # Extract last octet (e.g., 192.168.1.55 -> 55)
@@ -757,13 +936,15 @@ def api_config():
     old_main_port = MAIN_UI_OLD["offset"] + last_octet
     new_main_port = MAIN_UI["offset"] + last_octet
 
-    return jsonify({
+    out = {
         "switch_id": last_octet,
         "av_port": av_port,
         "new_main_port": new_main_port,
         "old_main_port": old_main_port,
         "port_offset": PORT_OFFSET,
-    })
+    }
+    #log_application("INFO", f"[INFO] api_config: computed ports for mgmt_ip={mgmt_ip}", extra={"component": "api", **out})
+    return jsonify(out)
 
 # -------------------------------------------------------------------------------------------------
 
@@ -772,31 +953,54 @@ def api_remove_mgmt_ip():
     body = request.get_json()
     device_id = body.get("device_id")
     if not device_id:
+        log_application("WARNING", "[WARNING] api_remove_mgmt_ip: device_id missing", extra={"component": "api"})
         return jsonify({"ok": False, "error": "device_id required"}), 400
     devices = read_devices_from_csv()
     d = find_device(devices, device_id)
     if not d:
+        log_application("WARNING", f"[WARNING] api_remove_mgmt_ip: device not found device_id={device_id}", device_id=device_id, extra={"component": "api"})
         return jsonify({"ok": False, "error": "device not found"}), 404
     old_ip = d.get("mgmt_ip", "")
     d["mgmt_ip"] = ""
     write_devices_to_csv(devices)
     log_operation("EDIT", device_id, {"field": "mgmt_ip", "old": old_ip, "new": ""})
+    log_application("INFO", f"[INFO] api_remove_mgmt_ip: cleared mgmt_ip (was {old_ip!r})", device_id=device_id, extra={"component": "api", "old_mgmt_ip": old_ip})
     return jsonify({"ok": True})
 
 @app.route("/api/reserve", methods=["POST"])
 def api_reserve():
-    body = request.get_json()
+    body = request.get_json() or {}
     device_id = body.get("device_id")
     user = body.get("user")
     hours = int(body.get("hours", 0))
     minutes = int(body.get("minutes", 0))
     duration_minutes = hours * 60 + minutes
     if not device_id or not user:
+        log_application(
+            "WARNING",
+            "[WARNING] api_reserve: device_id or user missing",
+            user=reservation_actor_user(body),
+            extra={"component": "api", "subsystem": "reservation"},
+        )
         return jsonify({"error": "device_id and user required"}), 400
     devices = read_devices_from_csv()
     d = find_device(devices, device_id)
     if not d:
+        log_application(
+            "WARNING",
+            f"[WARNING] api_reserve: device not found device_id={device_id}",
+            device_id=device_id,
+            user=user,
+            extra={"component": "api", "subsystem": "reservation"},
+        )
         return jsonify({"error": "device not found"}), 404
+    log_application(
+        "INFO",
+        f"[INFO] api_reserve: attempt user={user!r} hours={hours} minutes={minutes}",
+        device_id=device_id,
+        user=user,
+        extra={"component": "api", "subsystem": "reservation", "hours": hours, "minutes": minutes},
+    )
     old_tag = d.get("tag", "free")
     # Static Reservation if >= 24 hours
     if hours >= 24:
@@ -816,9 +1020,23 @@ def api_reserve():
     # --- Attempt to update switch hostname via telnet over singleton ssh_client ---
     console_ip = d.get("console_ip") or ""
     if not console_ip:
+        log_application(
+            "WARNING",
+            "[WARNING] api_reserve: console_ip missing",
+            device_id=device_id,
+            user=user,
+            extra={"component": "api", "subsystem": "reservation"},
+        )
         return jsonify({"error": "console_ip not found"}), 404
     port_id = int(d.get("port_id", 0))
     if not port_id:
+        log_application(
+            "WARNING",
+            "[WARNING] api_reserve: port_id missing",
+            device_id=device_id,
+            user=user,
+            extra={"component": "api", "subsystem": "reservation"},
+        )
         return jsonify({"error": "port_id not found"}), 404
 
     ok = False
@@ -827,32 +1045,90 @@ def api_reserve():
     new_name = device_id + '-' + re.sub(r"\s+", "", d.get("current_user") or "")
     mgmt = d.get("mgmt_ip") or ""
     serial_no = d.get("serial_no") or ""
-    if new_name and mgmt and health_manager.ensure_ssh():
+    if not new_name or not mgmt:
+        log_application(
+            "WARNING", f"[WARNING] api_reserve: skip hostname (new_name={new_name!r} mgmt={mgmt!r})",
+            device_id=device_id,
+            user=user,
+            extra={"component": "api", "subsystem": "reservation"},
+        )
+    elif not health_manager.ensure_ssh():
+        log_application(
+            "WARNING", "[WARNING] api_reserve: SSH unavailable; hostname not set",
+            device_id=device_id, user=user,
+            extra={"component": "api", "subsystem": "reservation"},
+        )
+    else:
         with health_manager.ssh_lock:
             try:
                 ok, msg = ssh_and_set_hostname(health_manager.ssh_client, mgmt, new_name, serial_no)
-            except Exception:
+            except Exception as e:
                 traceback.print_exc()
+                msg = str(e)
+                log_application(
+                    "ERROR", f"[ERROR] api_reserve: ssh_and_set_hostname exception: {e}",
+                    device_id=device_id, ser=user,
+                    extra={"component": "api", "subsystem": "reservation"},
+                )
     
     if ok:
         print(f">>> $ Hostname set to {new_name} for device: {device_id}")
         write_devices_to_csv(devices)
-        log_operation("EDIT", device_id, {"field": "tag", "old": old_tag, "new": d["tag"], "user": user})
+        log_operation(
+            "EDIT", device_id,
+            {"field": "tag", "old": old_tag, "new": d["tag"], "reservation_user": user},
+            user=user,
+        )
+        log_application(
+            "INFO", f"[INFO] api_reserve: success tag={d['tag']!r} hostname={new_name!r}",
+            device_id=device_id, user=user,
+            extra={
+                "component": "api",
+                "subsystem": "reservation",
+                "resv_end_time": d.get("resv_end_time"),
+            },
+        )
     else:
         print(f">>> $ Hostname change to {new_name} failed for device: {device_id}")
+        log_application(
+            "WARNING", f"[WARNING] api_reserve: failed (CSV not committed) msg={msg!r}",
+            device_id=device_id,
+            user=user,
+            extra={"component": "api", "subsystem": "reservation", "new_hostname": new_name},
+        )
     return jsonify({"ok": ok, "resv_end_time": d["resv_end_time"], "msg": msg})
 
 
 @app.route("/api/release", methods=["POST"])
 def api_release():
-    body = request.get_json()
+    body = request.get_json() or {}
     device_id = body.get("device_id")
     if not device_id:
+        log_application(
+            "WARNING", "[WARNING] api_release: device_id missing",
+            user=reservation_actor_user(body),
+            extra={"component": "api", "subsystem": "reservation"},
+        )
         return jsonify({"error": "device_id required"}), 400
     devices = read_devices_from_csv()
     d = find_device(devices, device_id)
     if not d:
+        log_application(
+            "WARNING", f"[WARNING] api_release: device not found device_id={device_id}",
+            device_id=device_id, user=reservation_actor_user(body),
+            extra={"component": "api", "subsystem": "reservation"},
+        )
         return jsonify({"error": "device not found"}), 404
+    ru = reservation_actor_user(body, d)
+    log_application(
+        "INFO", "[INFO] api_release: attempt",
+        device_id=device_id, user=ru,
+        extra={
+            "component": "api",
+            "subsystem": "reservation",
+            "current_user": d.get("current_user"),
+        },
+    )
     
     old_tag = d.get("tag", "free")
     old_user = d.get("current_user", "")
@@ -867,19 +1143,68 @@ def api_release():
 
 
     ok = False
-    if mgmt and model_name and health_manager.ensure_ssh():
+    msg = ""
+    hostname_attempted = False
+    if not mgmt or not model_name:
+        log_application(
+            "WARNING", f"[WARNING] api_release: skip hostname restore (mgmt={bool(mgmt)} model_name={bool(model_name)})",
+            device_id=device_id,
+            user=ru,
+            extra={"component": "api", "subsystem": "reservation"},
+        )
+    elif not health_manager.ensure_ssh():
+        log_application(
+            "WARNING",
+            "[WARNING] api_release: SSH unavailable; hostname not restored",
+            device_id=device_id,
+            user=ru,
+            extra={"component": "api", "subsystem": "reservation"},
+        )
+    else:
+        hostname_attempted = True
         with health_manager.ssh_lock:
             try:
-                ok,msg = ssh_and_set_hostname(health_manager.ssh_client, mgmt, model_name)
-            except Exception:
+                ok, msg = ssh_and_set_hostname(health_manager.ssh_client, mgmt, model_name)
+            except Exception as e:
                 traceback.print_exc()
+                msg = str(e)
+                log_application(
+                    "ERROR", f"[ERROR] api_release: ssh_and_set_hostname exception: {e}",
+                    device_id=device_id, user=ru,
+                    extra={"component": "api", "subsystem": "reservation"},
+                )
 
     if ok:
         print(f">>> $ Hostname restored to {model_name} for device {device_id}")
-    else:
+        log_application(
+            "INFO", f"[INFO] api_release: hostname restored to {model_name!r}",
+            device_id=device_id, user=ru,
+            extra={"component": "api", "subsystem": "reservation"},
+        )
+    elif hostname_attempted:
         print(f">>> $ Hostname restore to {model_name} failed for device {device_id}")
+        log_application(
+            "WARNING", f"[WARNING] api_release: hostname restore not ok msg={msg!r}",
+            device_id=device_id, user=ru,
+            extra={"component": "api", "subsystem": "reservation", "model_name": model_name},
+        )
     write_devices_to_csv(devices) # update in database even if reset hostname fails
-    log_operation("EDIT", device_id, {"field": "tag", "old": old_tag, "new": "free", "released_user": old_user})
+    log_operation(
+        "EDIT", device_id,
+        {
+            "field": "tag",
+            "old": old_tag,
+            "new": "free",
+            "released_user": old_user,
+            "reservation_user": ru,
+        },
+        user=ru,
+    )
+    log_application(
+        "INFO", "[INFO] api_release: CSV updated tag=free",
+        device_id=device_id, user=ru,
+        extra={"component": "api", "subsystem": "reservation", "released_user": old_user},
+    )
     return jsonify({"ok": ok, "msg": msg})
 
 
@@ -888,11 +1213,14 @@ def api_refresh_health():
     body = request.get_json()
     device_id = body.get("device_id")
     if not device_id:
+        log_application("WARNING", "[WARNING] api_refresh_health: device_id missing", extra={"component": "api"})
         return jsonify({"error": "device_id required"}), 400
     devices = read_devices_from_csv()
     d = find_device(devices, device_id)
     if not d:
+        log_application("WARNING", f"[WARNING] api_refresh_health: device not found device_id={device_id}", device_id=device_id, extra={"component": "api"})
         return jsonify({"error": "device not found"}), 404
+    log_application("INFO", "[INFO] api_refresh_health: request", device_id=device_id, extra={"component": "api"})
 
     # load CSV to find related metadata (port_id, mgmt_ip)
     console_ip = d.get("console_ip") or ""
@@ -908,6 +1236,7 @@ def api_refresh_health():
                 "retry_count": 0,
                 "next_check_ts": time.time() + 0.1
             }
+            log_application("INFO", "[INFO] api_refresh_health: initialized device_state", device_id=device_id, extra={"component": "api"})
             return jsonify({"ok": True})
 
         health = st.get("health", "unk").lower()
@@ -919,8 +1248,9 @@ def api_refresh_health():
             with health_manager.ssh_lock:
                 try:
                     ok = ssh_ping_once(health_manager.ssh_client, mgmt_ip, count=2, timeout=4)
-                except Exception:
+                except Exception as e:
                     ok = False
+                    log_application("ERROR", f"[ERROR] api_refresh_health: ping exception: {e}", device_id=device_id, extra={"component": "api", "mgmt_ip": mgmt_ip})
             with device_state_lock:
                 if ok:
                     st["health"] = "up"
@@ -931,9 +1261,14 @@ def api_refresh_health():
                     st["health"] = "down"
                     st["retry_count"] = 1
                     st["next_check_ts"] = time.time() + DOWN_HEALTH_TIMER
-            
+            log_application(
+                "INFO" if ok else "WARNING",
+                f"[{'INFO' if ok else 'WARNING'}] api_refresh_health: immediate ping mgmt={mgmt_ip} -> {'up' if ok else 'down'}",
+                device_id=device_id, extra={"component": "api", "status": st["health"]},
+            )
             return jsonify({"ok": True, "status": st["health"]})
         else:
+            log_application("WARNING", "[WARNING] api_refresh_health: unable to open ssh to lab (ping path)", device_id=device_id, extra={"component": "api"})
             return jsonify({"ok": False,  "reason": "unable to open ssh to pi"})
     
     # if health == "unk" --> most likely mgmt_ip not present
@@ -942,12 +1277,14 @@ def api_refresh_health():
         if not (console_ip and is_valid_ipv4(console_ip)): # can't telnet without console ip info (ipv4)
             with device_state_lock:
                 st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+            log_application("WARNING", "[WARNING] api_refresh_health: missing/invalid console_ip", device_id=device_id, extra={"component": "api"})
             return jsonify({"ok": False, "reason": "missing/invalid console_ip, need manual input"})
         
         if not port_id: # can't telnet without port info (non zero)
             # initialize state to re-check later
             with device_state_lock:
                 st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+            log_application("WARNING", "[WARNING] api_refresh_health: missing port_id", device_id=device_id, extra={"component": "api"})
             return jsonify({"ok": False, "reason": "missing port_id, need manual input"})
 
         # Use health_manager's ssh client (singleton). Best-effort.
@@ -955,18 +1292,21 @@ def api_refresh_health():
             # schedule retry
             with device_state_lock:
                 st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+            log_application("WARNING", "[WARNING] api_refresh_health: unable to open ssh to lab (telnet path)", device_id=device_id, extra={"component": "api"})
             return jsonify({"ok": False, "reason": "unable to open ssh to lab"})
 
         with health_manager.ssh_lock:
             try:
                 res = telnet_and_run_show_serviceport(health_manager.ssh_client, console_ip, PORT_OFFSET + port_id)
-            except Exception:
+            except Exception as e:
                 res = None
+                log_application("ERROR", f"[ERROR] api_refresh_health: telnet exception: {e}", device_id=device_id, extra={"component": "api"})
 
         if not res:
             # failed to get info — schedule re-check later
             with device_state_lock:
                 st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+            log_application("WARNING", "[WARNING] api_refresh_health: telnet returned no data", device_id=device_id, extra={"component": "api"})
             return jsonify({"ok": False, "reason": "telnet did not return data"})
 
         # If Interface Status is up and IP found, update CSV mgmt_ip and schedule immediate ping
@@ -982,21 +1322,28 @@ def api_refresh_health():
                     st["retry_count"] = 0
                     st["next_check_ts"] = time.time() + 0.1
                 log_operation("EDIT", device_id, {"field": "mgmt_ip", "old": mgmt_ip, "new": ip_addr, "source": "auto-discover"})
+                log_application("INFO", f"[INFO] api_refresh_health: auto-discovered mgmt_ip={ip_addr}", device_id=device_id, extra={"component": "api"})
                 return jsonify({"ok": True, "status": st["health"]})
             else:
                 with device_state_lock:
                     st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+                log_application("WARNING", "[WARNING] api_refresh_health: device row missing during mgmt update", device_id=device_id, extra={"component": "api"})
                 return jsonify({"ok": False, "reason": "device ip not found during update"})
         elif int_status == "busy":
             # couldn't find usable ip or interface down
             with device_state_lock:
                 st["health"] = "busy"
                 st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+            log_application("WARNING", "[WARNING] api_refresh_health: console port busy", device_id=device_id, extra={"component": "api"})
             return jsonify({"ok": True, "status": st["health"], "reason": "Telnet to port failed! Selected hunt group busy.", "raw": res.get("raw")})
         else:
             # couldn't find usable ip or interface down
             with device_state_lock:
                 st["next_check_ts"] = time.time() + UP_HEALTH_TIMER
+            log_application(
+                "WARNING", f"[WARNING] api_refresh_health: no usable mgmt from telnet int_status={int_status!r}",
+                device_id=device_id, extra={"component": "api"},
+            )
             return jsonify({"ok": False, "reason": "no usable ip or interface not up", "raw": res.get("raw")})
 
 # -----------------------
@@ -1008,31 +1355,37 @@ def api_db_add():
     """Add new device entry to database"""
     body = request.get_json()
     if not body:
+        log_application("WARNING", "[WARNING] api_db_add: no JSON body", extra={"component": "api"})
         return jsonify({"ok": False, "error": "No data provided"}), 400
     
     # Validate required fields
     required = ["device_id", "console_ip", "port_id"]
     for field in required:
         if field not in body or not body[field]:
+            log_application("WARNING", f"[WARNING] api_db_add: missing field {field}", extra={"component": "api"})
             return jsonify({"ok": False, "error": f"Missing required field: {field}"}), 400
     
     devices = read_devices_from_csv()
     
     # Check for duplicate device_id
     if find_device(devices, body["device_id"]):
+        log_application("WARNING", f"[WARNING] api_db_add: duplicate device_id={body['device_id']}", device_id=body["device_id"], extra={"component": "api"})
         return jsonify({"ok": False, "error": "device_id already exists"}), 400
     
     # Validate port_id range
     try:
         port_id = int(body.get("port_id", 0))
         if port_id < 1 or port_id > 64:
+            log_application("WARNING", f"[WARNING] api_db_add: invalid port_id={port_id}", extra={"component": "api"})
             return jsonify({"ok": False, "error": "port_id must be between 1-64"}), 400
     except ValueError:
+        log_application("WARNING", "[WARNING] api_db_add: port_id not a number", extra={"component": "api"})
         return jsonify({"ok": False, "error": "port_id must be a number"}), 400
     
     # Validate console_ip ipv4
     console_ip = body.get("console_ip", "")
     if not (console_ip and is_valid_ipv4(console_ip)): 
+        log_application("WARNING", "[WARNING] api_db_add: invalid console_ip", extra={"component": "api"})
         return jsonify({"ok": False, "error": "missing/invalid console_ip!"}), 400
 
     # Create new device entry with only updatable fields + defaults
@@ -1055,6 +1408,7 @@ def api_db_add():
     
     # Log operation
     log_operation("ADD", new_device["device_id"], {"fields": new_device})
+    log_application("INFO", f"[INFO] api_db_add: device added device_id={new_device['device_id']}", device_id=new_device["device_id"], extra={"component": "api"})
     
     # Auto-discover mgmt_ip via telnet
     try:
@@ -1072,8 +1426,10 @@ def api_db_add():
                         write_devices_to_csv(devices)
                         log_operation("EDIT", new_device["device_id"], {"field": "mgmt_ip", "old": "", "new": ip_addr, "source": "auto-discover-on-add"})
                         print(f">>> $ Auto-discovered mgmt_ip {ip_addr} for device {new_device['device_id']}")
+                        log_application("INFO", f"[INFO] api_db_add: auto-discovered mgmt_ip={ip_addr}", device_id=new_device["device_id"], extra={"component": "api"})
     except Exception as e:
         print(f">>> $ Auto-discover failed for {new_device['device_id']}: {e}")
+        log_application("WARNING", f"[WARNING] api_db_add: auto-discover exception: {e}", device_id=new_device["device_id"], extra={"component": "api"})
     
     return jsonify({"ok": True, "device": new_device})
 
@@ -1082,15 +1438,18 @@ def api_db_edit():
     """Edit existing device entry (only UPDATABLE_FIELDS)"""
     body = request.get_json()
     if not body:
+        log_application("WARNING", "[WARNING] api_db_edit: no JSON body", extra={"component": "api"})
         return jsonify({"ok": False, "error": "No data provided"}), 400
     
     device_id = body.get("device_id")
     if not device_id:
+        log_application("WARNING", "[WARNING] api_db_edit: device_id missing", extra={"component": "api"})
         return jsonify({"ok": False, "error": "device_id required"}), 400
     
     devices = read_devices_from_csv()
     d = find_device(devices, device_id)
     if not d:
+        log_application("WARNING", f"[WARNING] api_db_edit: device not found device_id={device_id}", device_id=device_id, extra={"component": "api"})
         return jsonify({"ok": False, "error": "device not found"}), 404
     
     changes = {}
@@ -1104,13 +1463,16 @@ def api_db_edit():
                 try:
                     port_id = int(new_val)
                     if port_id < 1 or port_id > 64:
+                        log_application("WARNING", f"[WARNING] api_db_edit: invalid port_id={port_id}", device_id=device_id, extra={"component": "api"})
                         return jsonify({"ok": False, "error": "port_id must be between 1-64"}), 400
                 except ValueError:
+                    log_application("WARNING", "[WARNING] api_db_edit: port_id not a number", device_id=device_id, extra={"component": "api"})
                     return jsonify({"ok": False, "error": "port_id must be a number"}), 400
             
             # Validate console_ip
             console_ip = body.get("console_ip", "")
             if not (console_ip and is_valid_ipv4(console_ip)):
+                log_application("WARNING", "[WARNING] api_db_edit: invalid console_ip", device_id=device_id, extra={"component": "api"})
                 return jsonify({"ok": False, "error": "missing/invalid console_ip!"}), 400
 
             if old_val != new_val:
@@ -1118,10 +1480,12 @@ def api_db_edit():
                 changes[field] = {"old": old_val, "new": new_val}
     
     if not changes:
+        log_application("INFO", "[INFO] api_db_edit: no field changes", device_id=device_id, extra={"component": "api"})
         return jsonify({"ok": True, "message": "No changes made"})
     
     write_devices_to_csv(devices)
     log_operation("EDIT", device_id, {"fields": changes})
+    log_application("INFO", f"[INFO] api_db_edit: saved changes keys={list(changes.keys())}", device_id=device_id, extra={"component": "api"})
     
     # If port_id changed, try to auto-discover mgmt_ip
     if "port_id" in changes or "console_ip" in changes:
@@ -1140,6 +1504,7 @@ def api_db_edit():
                             changes["mgmt_ip"] = {"old": old_ip, "new": ip_addr}
         except Exception as e:
             print(f">>> $ Auto-discover failed after port change for {device_id}: {e}")
+            log_application("WARNING", f"[WARNING] api_db_edit: auto-discover after port change failed: {e}", device_id=device_id, extra={"component": "api"})
     
     return jsonify({"ok": True, "changes": changes})
 
@@ -1149,11 +1514,13 @@ def api_db_delete():
     body = request.get_json()
     device_id = body.get("device_id")
     if not device_id:
+        log_application("WARNING", "[WARNING] api_db_delete: device_id missing", extra={"component": "api"})
         return jsonify({"ok": False, "error": "device_id required"}), 400
     
     devices = read_devices_from_csv()
     d = find_device(devices, device_id)
     if not d:
+        log_application("WARNING", f"[WARNING] api_db_delete: device not found device_id={device_id}", device_id=device_id, extra={"component": "api"})
         return jsonify({"ok": False, "error": "device not found"}), 404
     
     # Store device data for logging before deletion
@@ -1190,6 +1557,7 @@ def api_db_console_ip():
     write_devices_to_csv(devices)
     
     log_operation("EDIT", device_id, {"field": "port_id", "old": old_ip, "new": console_ip})
+    log_application("INFO", f"[INFO] api_db_console/ip: console_ip set to {console_ip!r}", device_id=device_id, extra={"component": "api"})
     
     # Auto-discover mgmt_ip with new port
     mgmt_discovered = None
@@ -1208,6 +1576,7 @@ def api_db_console_ip():
                         mgmt_discovered = ip_addr
     except Exception as e:
         print(f">>> $ Auto-discover failed for {device_id}: {e}")
+        log_application("WARNING", f"[WARNING] api_db_console/ip: auto-discover failed: {e}", device_id=device_id, extra={"component": "api"})
     
     return jsonify({"ok": True, "mgmt_ip": mgmt_discovered})
 
@@ -1218,18 +1587,22 @@ def api_db_console_port():
     device_id = body.get("device_id")
     
     if not device_id:
+        log_application("WARNING", "[WARNING] api_db_console/port: device_id missing", extra={"component": "api"})
         return jsonify({"ok": False, "error": "device_id required"}), 400
     
     try:
         port_id = int(body.get("port_id"))
         if port_id < 1 or port_id > 64:
+            log_application("WARNING", f"[WARNING] api_db_console/port: invalid port_id={port_id}", device_id=device_id, extra={"component": "api"})
             return jsonify({"ok": False, "error": "port_id must be between 1-64"}), 400
     except ValueError:
+        log_application("WARNING", "[WARNING] api_db_console/port: port_id not a number", device_id=device_id, extra={"component": "api"})
         return jsonify({"ok": False, "error": "port_id must be a number"}), 400
     
     devices = read_devices_from_csv()
     d = find_device(devices, device_id)
     if not d:
+        log_application("WARNING", f"[WARNING] api_db_console/port: device not found device_id={device_id}", device_id=device_id, extra={"component": "api"})
         return jsonify({"ok": False, "error": "device not found"}), 404
     
     old_port = d.get("port_id", "")
@@ -1237,6 +1610,7 @@ def api_db_console_port():
     write_devices_to_csv(devices)
     
     log_operation("EDIT", device_id, {"field": "port_id", "old": old_port, "new": str(port_id)})
+    log_application("INFO", f"[INFO] api_db_console/port: port_id set to {port_id}", device_id=device_id, extra={"component": "api"})
     
     # Auto-discover mgmt_ip with new port
     mgmt_discovered = None
@@ -1255,6 +1629,7 @@ def api_db_console_port():
                         mgmt_discovered = ip_addr
     except Exception as e:
         print(f">>> $ Auto-discover failed for {device_id}: {e}")
+        log_application("WARNING", f"[WARNING] api_db_console/port: auto-discover failed: {e}", device_id=device_id, extra={"component": "api"})
     
     return jsonify({"ok": True, "mgmt_ip": mgmt_discovered})
 
@@ -1264,6 +1639,7 @@ def start_background_services():
     init_device_state_from_csv()
     health_manager.start()
     reservation_monitor.start()
+    log_application("INFO", "[INFO] background service threads started", extra={"component": "startup"})
 
 def kill_process_on_port(port):
     """Forcefully kills any process running on the specified port (Linux/Unix)."""
@@ -1294,4 +1670,8 @@ if __name__ == "__main__":
     start_background_services()
     
     # 3. Run Flask (use_reloader=False is safer for manual port management)
+    log_application(
+        "INFO", f"[INFO] Flask listen host=0.0.0.0 port={args.port} debug={args.debug}",
+        extra={"component": "startup", "port": args.port, "debug": args.debug},
+    )
     app.run(host="0.0.0.0", port=args.port, debug=args.debug, use_reloader=False, threaded=True)

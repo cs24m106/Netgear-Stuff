@@ -158,35 +158,10 @@ function bootstrapifyButtons(root) {
     });
 }
 
-/* =========================
- * 5A. Table Theme Toggle
- * ========================= */
-const THEME_KEY = 'switchmgr.theme';
-
-function setTheme(theme) {
-    if (theme === 'dark') document.body.setAttribute('data-theme', 'dark');
-    else document.body.removeAttribute('data-theme');
-    try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
-}
-
-function toggleTheme() {
-    const cur = (document.body.getAttribute('data-theme') === 'dark') ? 'dark' : 'light';
-    const next = cur === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    console.info('Theme switched to', next);
-}
-
-(function initTheme() {
-    try {
-        const saved = localStorage.getItem(THEME_KEY) || 'light';
-        setTheme(saved);
-        const btn = document.getElementById('themeToggle');
-        if (btn) btn.addEventListener('click', toggleTheme);
-    } catch (e) {}
-})();
+/* Theme toggle: see /static/toolbar.js (shared with Statistics page). */
 
 /* =========================
- * 5B. Table Filters
+ * 5. Table Filters
  * ========================= */
 function normalizeFilterValue(val) {
     return String(val || '').trim().toLowerCase();
@@ -1232,15 +1207,6 @@ async function handleDownloadCsv() {
     }
     const dlBtn = document.getElementById('downloadCsv') || document.getElementById('downloadCSV') || document.getElementById('exportCsv');
     if (dlBtn) dlBtn.addEventListener('click', handleDownloadCsv);
-    const tBtn = document.getElementById('themeToggle');
-    if (tBtn) {
-        tBtn.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                toggleTheme();
-            }
-        });
-    }
 })();
 
 /* =========================
@@ -1248,7 +1214,7 @@ async function handleDownloadCsv() {
  * ========================= */
 window.addEventListener('load', () => {
     if (!document.querySelector('#devices_table tbody')) {
-        console.warn('bootstrap.js: devices_table tbody not found');
+        console.warn('main.js: devices_table tbody not found');
         return;
     }
     

@@ -1,0 +1,233 @@
+{
+  "lab": {
+    "PI":{"IP":"10.25.4.200", "USER":"host1", "PSWD":"sheldon123"},
+    "NUC":{"IP":"10.25.4.201", "USER":"swnuc01", "PSWD":"switch@123"}
+  },
+  "devices": [
+    {
+      "static": {"device_id": "ng-370", "serial_no": "7FD8585FA01B3", "model_name": "M4250-40G8F-PoE+", "hw_id": "GSM4248P V1"},
+      "dynm": {"mgmt_ip": "192.168.1.187", "console_ip": "192.168.1.102", "port_id": "1"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-366", "serial_no": "7A89595XA0012", "model_name": "M4350-24X8F8V", "hw_id": "XSM4340V V1"},
+      "dynm": {"mgmt_ip": "192.168.1.184", "console_ip": "192.168.1.102", "port_id": "3"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-376", "serial_no": "70VF595CA0CD4", "model_name": "M4250-10G2F-PoE+", "hw_id": "GSM4212P V1"},
+      "dynm": {"mgmt_ip": "192.168.1.132", "console_ip": "192.168.1.102", "port_id": "5"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-348", "serial_no": "7FW9595CA0017", "model_name": "M4350-24X4F", "hw_id": "XSM4328CV V1"},
+      "dynm": {"mgmt_ip": "192.168.1.165", "console_ip": "192.168.1.102", "port_id": "6"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-377", "serial_no": "70VF5950A0C74", "model_name": "M4250-10G2F-PoE+", "hw_id": "GSM4212P V1"},
+      "dynm": {"mgmt_ip": "192.168.1.160", "console_ip": "192.168.1.102", "port_id": "7"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-aaa", "serial_no": "6YXF5C57A04D5", "model_name": "M4250-8G2XF-PoE+", "hw_id": "GSM4210PX V1"},
+      "dynm": {"mgmt_ip": "192.168.1.171", "console_ip": "192.168.1.102", "port_id": "9"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-371", "serial_no": "7FW95958A01F4", "model_name": "M4350-24X4V", "hw_id": "XSM4328CV V1"},
+      "dynm": {"mgmt_ip": "192.168.1.159", "console_ip": "192.168.1.102", "port_id": "13"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-482", "serial_no": "6YWE595AA1171", "model_name": "M4250-9G1F-PoE+", "hw_id": "GSM4210PD V1"},
+      "dynm": {"mgmt_ip": "", "console_ip": "192.168.1.102", "port_id": "14"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-479", "serial_no": "6YWE595XA1030", "model_name": "M4250-9G1F-PoE+", "hw_id": "GSM4210PD V1"},
+      "dynm": {"mgmt_ip": "192.168.1.142", "console_ip": "192.168.1.102", "port_id": "15"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-470", "serial_no": "7R82595UA00CE", "model_name": "M4350-8M2V", "hw_id": "MSM4310 V1"},
+      "dynm": {"mgmt_ip": "192.168.1.144", "console_ip": "192.168.1.102", "port_id": "16"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-331", "serial_no": "7R82595PA00BC", "model_name": "M4350-8M2V", "hw_id": "MSM4310 V1"},
+      "dynm": {"mgmt_ip": "", "console_ip": "192.168.1.102", "port_id": "21"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-465", "serial_no": "6YWE5955A1061", "model_name": "M4250-9G1F-PoE+", "hw_id": "GSM4210PD V1"},
+      "dynm": {"mgmt_ip": "", "console_ip": "192.168.1.102", "port_id": "22"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-bbb", "serial_no": "6YXF5C5GA04DE", "model_name": "M4250-8G2XF-PoE+", "hw_id": "GSM4210PX V1"},
+      "dynm": {"mgmt_ip": "", "console_ip": "192.168.1.102", "port_id": "37"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-381", "serial_no": "6YXB535SA009E", "model_name": "M4250-8G2XF-PoE+", "hw_id": "GSM4210PX V1"},
+      "dynm": {"mgmt_ip": "", "console_ip": "192.168.1.102", "port_id": "33"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-362", "serial_no": "6MJK577SD00EB", "model_name": "M4300-48X", "hw_id": ""},
+      "dynm": {"mgmt_ip": "192.168.1.162", "console_ip": "192.168.1.102", "port_id": "41"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-367", "serial_no": "7RC1565HA0066", "model_name": "M4350-24F4X", "hw_id": "MSM4328F V1"},
+      "dynm": {"mgmt_ip": "192.168.1.164", "console_ip": "192.168.1.102", "port_id": "43"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-380", "serial_no": "74V13753A0106", "model_name": "M4350-8X8F", "hw_id": "XSM4316 V1"},
+      "dynm": {"mgmt_ip": "", "console_ip": "192.168.1.102", "port_id": "46"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-374", "serial_no": "7A89595YA0013", "model_name": "M4350-24X8F8V", "hw_id": "XSM4340V V1"},
+      "dynm": {"mgmt_ip": "192.168.1.189", "console_ip": "192.168.1.104", "port_id": "3"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-ccc", "serial_no": "6YXF5C58A04D6", "model_name": "M4250-8G2XF-PoE+", "hw_id": "GSM4210PX V1"},
+      "dynm": {"mgmt_ip": "192.168.1.172", "console_ip": "192.168.1.104", "port_id": "4"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-379", "serial_no": "6YWE595LA0492", "model_name": "M4250-9G1F-PoE+", "hw_id": "GSM4210PD V1"},
+      "dynm": {"mgmt_ip": "", "console_ip": "192.168.1.104", "port_id": "5"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-347", "serial_no": "7FW95957A0004", "model_name": "M4350-24X4V", "hw_id": "XSM4328CV V1"},
+      "dynm": {"mgmt_ip": "192.168.1.188", "console_ip": "192.168.1.104", "port_id": "6"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-375", "serial_no": "7FN85958A022A", "model_name": "M4250-40G8XF-PoE++", "hw_id": "GSM4248UX V1"},
+      "dynm": {"mgmt_ip": "192.168.1.175", "console_ip": "192.168.1.104", "port_id": "8"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-352", "serial_no": "7A78575LA00D1", "model_name": "M4350-36X4V", "hw_id": "XSM4340CV V1"},
+      "dynm": {"mgmt_ip": "192.168.1.183", "console_ip": "192.168.1.104", "port_id": "9"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-378", "serial_no": "74W8565KA0007", "model_name": "M4350-12X12F", "hw_id": "XSM4324 V1"},
+      "dynm": {"mgmt_ip": "192.168.1.105", "console_ip": "192.168.1.104", "port_id": "10"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-359", "serial_no": "7UV1505N0002E", "model_name": "M4350-16C", "hw_id": "CSM4316 V1"},
+      "dynm": {"mgmt_ip": "", "console_ip": "192.168.1.104", "port_id": "11"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-364", "serial_no": "74Y6545LA012D", "model_name": "M4350-24F4V", "hw_id": "XSM4328FV V1"},
+      "dynm": {"mgmt_ip": "", "console_ip": "192.168.1.104", "port_id": "15"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-332", "serial_no": "4G3X4B7MD0049", "model_name": "M4300-8X8F", "hw_id": ""},
+      "dynm": {"mgmt_ip": "192.168.1.178", "console_ip": "192.168.1.104", "port_id": "21"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-363", "serial_no": "4G3X4B7JD001C", "model_name": "M4300-8X8F", "hw_id": ""},
+      "dynm": {"mgmt_ip": "192.168.1.178", "console_ip": "192.168.1.104", "port_id": "18"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-472", "serial_no": "7R82595GA00B5", "model_name": "M4350-8M2V", "hw_id": "MSM4310 V1"},
+      "dynm": {"mgmt_ip": "192.168.1.143", "console_ip": "192.168.1.104", "port_id": "20"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-370", "serial_no": "7FD8585FA01B3", "model_name": "M4250-40G8F-PoE+", "hw_id": "GSM4248P V1"},
+      "dynm": {"mgmt_ip": "10.3.187.236", "console_ip": "192.168.1.104", "port_id": "25"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-344", "serial_no": "7WD1595G0000D", "model_name": "M4550-32Q", "hw_id": "DSM4532 V1"},
+      "dynm": {"mgmt_ip": "192.168.1.182", "console_ip": "192.168.1.104", "port_id": "30"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-454", "serial_no": "7FXA5C53A0169", "model_name": "M4350-48G4XF", "hw_id": "GSM4352 V1"},
+      "dynm": {"mgmt_ip": "192.168.11.125", "console_ip": "192.168.1.104", "port_id": "33"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-460", "serial_no": "7FXA5C5LA00FB", "model_name": "M4350-48G4XF", "hw_id": "GSM4352 V1"},
+      "dynm": {"mgmt_ip": "", "console_ip": "192.168.1.104", "port_id": "34"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-334", "serial_no": "7A78575HA00A4", "model_name": "M4350-36X4V", "hw_id": "XSM4340CV V1"},
+      "dynm": {"mgmt_ip": "192.168.11.144", "console_ip": "192.168.1.104", "port_id": "35"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-493", "serial_no": "7RE15558A007E", "model_name": "M4350-40F4C", "hw_id": "XSM4344FC V1"},
+      "dynm": {"mgmt_ip": "10.3.186.56", "console_ip": "192.168.1.104", "port_id": "36"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-ddd", "serial_no": "7RA14B54F0013", "model_name": "M4350-24M4X4V", "hw_id": "MSM4332 V1"},
+      "dynm": {"mgmt_ip": "192.168.11.131", "console_ip": "192.168.1.104", "port_id": "37"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-423", "serial_no": "7RC14C52F0008", "model_name": "M4350-24F4X", "hw_id": "MSM4328F V1"},
+      "dynm": {"mgmt_ip": "10.3.187.157", "console_ip": "192.168.1.104", "port_id": "38"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-421", "serial_no": "7RE14058F000E", "model_name": "M4350-40F4C", "hw_id": "XSM4344FC V1"},
+      "dynm": {"mgmt_ip": "10.3.185.96", "console_ip": "192.168.1.104", "port_id": "39"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-350", "serial_no": "7A67575NA001E", "model_name": "M4350-16V4C", "hw_id": "VSM4320C V1"},
+      "dynm": {"mgmt_ip": "10.3.184.177", "console_ip": "192.168.1.104", "port_id": "41"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-471", "serial_no": "7R82595FA0098", "model_name": "M4350-8M2V", "hw_id": "MSM4310 V1"},
+      "dynm": {"mgmt_ip": "192.168.1.133", "console_ip": "192.168.1.104", "port_id": "43"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-449", "serial_no": "7FXA5C58A009B", "model_name": "M4350-48G4XF", "hw_id": "GSM4352 V1"},
+      "dynm": {"mgmt_ip": "192.168.1.124", "console_ip": "192.168.1.104", "port_id": "44"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-eee", "serial_no": "7FRA595SA00E3", "model_name": "M4350-44M4X4V", "hw_id": "MSM4352 V1"},
+      "dynm": {"mgmt_ip": "", "console_ip": "192.168.1.104", "port_id": "45"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-453", "serial_no": "7FXA5C5PA0141", "model_name": "M4350-48G4XF", "hw_id": "GSM4352 V1"},
+      "dynm": {"mgmt_ip": "192.168.11.107", "console_ip": "192.168.1.104", "port_id": "46"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-ggg", "serial_no": "7FXA5C5HA00F8", "model_name": "M4350-48G4XF", "hw_id": "GSM4352 V1"},
+      "dynm": {"mgmt_ip": "192.168.11.208", "console_ip": "192.168.1.104", "port_id": "47"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    },
+    {
+      "static": {"device_id": "ng-fff", "serial_no": "7FXA5C5AA009D", "model_name": "M4350-48G4XF", "hw_id": "GSM4352 V1"},
+      "dynm": {"mgmt_ip": "192.168.1.132", "console_ip": "192.168.1.104", "port_id": "48"},
+      "resv": {"tag": "free", "current_user": "", "duration": "", "resv_end_time": ""}
+    }
+  ]
+}

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Operations statistics</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/static/theme.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="container-fluid py-3">
+    <div class="topbar">
+      <div style="display:flex; gap:0.8rem; align-items:center; flex-wrap:wrap;">
+        <h1 class="page-title mb-0">Operations statistics</h1>
+        <div class="meta-small">operations.log · filters · charts</div>
+      </div>
+      <div class="toolbar d-flex flex-wrap gap-2 align-items-center justify-content-end">
+        <a href="/" class="btn btn-sm btn-outline-primary" id="navManager">Manager</a>
+        <button id="themeToggle" class="btn btn-outline-secondary btn-sm" type="button" aria-label="Toggle theme">Toggle theme</button>
+        <button id="statsRefresh" class="btn btn-sm btn-outline-secondary" type="button" title="Reload statistics">Refresh</button>
+        <div class="btn-group">
+          <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">Export</button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" href="#" id="exportJsonl">JSON Lines</a></li>
+            <li><a class="dropdown-item" href="#" id="exportCsv">CSV</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <form id="statsFilterForm" class="row g-2 align-items-end mb-3 small">
+      <div class="col-md-2">
+        <label class="form-label mb-0">Time</label>
+        <select class="form-select form-select-sm" name="time_preset" id="timePreset">
+          <option value="week">Past week</option>
+          <option value="month">Past month</option>
+          <option value="all">Show all (segment)</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-0">Segment lines</label>
+        <input class="form-control form-control-sm" type="number" name="max_segment_lines" id="maxSegmentLines" value="20000" min="100" max="200000" />
+      </div>
+      <div class="col-md-1">
+        <label class="form-label mb-0">Segment #</label>
+        <input class="form-control form-control-sm" type="number" name="segment" id="segment" value="0" min="0" />
+      </div>
+      <div class="col-md-1">
+        <label class="form-label mb-0">Page size</label>
+        <input class="form-control form-control-sm" type="number" name="recent_limit" id="recentLimitInput" value="100" min="1" max="500" />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-0">Device contains</label>
+        <input class="form-control form-control-sm" name="device_id" id="filterDevice" placeholder="partial id" />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-0">User contains</label>
+        <input class="form-control form-control-sm" name="user" id="filterUser" />
+      </div>
+      <div class="col-md-1">
+        <label class="form-label mb-0">Op</label>
+        <select class="form-select form-select-sm" name="operation" id="filterOp">
+          <option value="">any</option>
+          <option>LOG</option>
+          <option>ADD</option>
+          <option>EDIT</option>
+          <option>DELETE</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-0">Component</label>
+        <input class="form-control form-control-sm" name="component" id="filterComponent" placeholder="api, http…" />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-0">Subsystem</label>
+        <input class="form-control form-control-sm" name="subsystem" id="filterSubsystem" placeholder="reservation" />
+      </div>
+      <div class="col-md-1">
+        <label class="form-label mb-0">Level</label>
+        <select class="form-select form-select-sm" name="level" id="filterLevel">
+          <option value="">any</option>
+          <option>INFO</option>
+          <option>WARNING</option>
+          <option>ERROR</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-0">Path contains</label>
+        <input class="form-control form-control-sm" name="path_contains" id="filterPath" />
+      </div>
+      <div class="col-md-2 d-flex gap-1 flex-wrap">
+        <button type="submit" class="btn btn-sm btn-primary">Apply</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="segPrev" title="Older log lines">Segment prev</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="segNext" title="Newer log lines">Segment next</button>
+      </div>
+    </form>
+
+    <p class="text-muted small mb-2" id="statsMeta"></p>
+
+    <div class="row g-3 mb-3">
+      <div class="col-lg-4 col-md-6"><canvas id="chartByOp" height="220"></canvas></div>
+      <div class="col-lg-4 col-md-6"><canvas id="chartByLevel" height="220"></canvas></div>
+      <div class="col-lg-4 col-md-6"><canvas id="chartHttp" height="220"></canvas></div>
+      <div class="col-12"><canvas id="chartTimeline" height="120"></canvas></div>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h2 class="h6 mb-0">Events (newest first)</h2>
+      <div class="btn-group btn-group-sm">
+        <button type="button" class="btn btn-outline-secondary" id="eventsPrev">Newer batch</button>
+        <button type="button" class="btn btn-outline-secondary" id="eventsNext">Older batch</button>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle" id="eventsTable">
+        <thead><tr><th>Time</th><th>Op</th><th>Device</th><th>User</th><th>Level</th><th>Message</th></tr></thead>
+        <tbody id="eventsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/static/toolbar.js"></script>
+  <script src="/static/stats.js"></script>
+</body>
+</html>

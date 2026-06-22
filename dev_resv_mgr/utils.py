@@ -9,6 +9,7 @@ splits each device into the ``static`` / ``dynm`` / ``resv`` groups defined in
 import datetime
 import json
 import re
+import select
 import threading
 import time
 import traceback
@@ -17,6 +18,32 @@ from filelock import FileLock
 
 import config
 from config import *
+
+# Hostname-update lifecycle markers shown in the reservation block.
+HOSTNAME_STATUS_PENDING = "pending"
+HOSTNAME_STATUS_OK = "ok"
+HOSTNAME_STATUS_FAILED = "failed"
+
+HOSTNAME_STATUS_SYMBOLS = {
+    HOSTNAME_STATUS_PENDING: "…",
+    HOSTNAME_STATUS_OK: "✓",
+    HOSTNAME_STATUS_FAILED: "✗",
+}
+
+# Common terminators we read until on a console/telnet/ssh-shell channel.
+# Matching any of these lets _read_channel_until return as soon as the device
+# has actually printed a prompt, instead of waiting out the full timeout.
+_CHANNEL_PROMPT_RE = re.compile(
+    r"\)\s?[>#]\s*$"                                # switch CLI prompt: (host)> or (host)#
+    r"|User[: ]*$"                                  # telnet "User:" prompt
+    r"|[Pp]assword[: ]*$"                           # password prompt
+    r"|\(yes/no(?:/\[fingerprint\])?\)\?\s*$"       # ssh hostkey prompt
+    r"|hunt group busy"                             # console server: line in use
+    r"|Connection refused"
+    r"|[Pp]ermission denied"
+    r"|[Cc]onnection closed",
+    re.MULTILINE,
+)
 
 # -------------------------------------------------------------------------------------------------
 # Audit logging (operations.log — used by api, app; config shims call these via deferred import)
@@ -222,9 +249,30 @@ def init_device_state_from_db():
             if did not in device_state:
                 device_state[did] = {
                     "health": "unk", "retry_count": 0,
-                    "next_check_ts": time.time() + 1
+                    "next_check_ts": time.time() + 1,
+                    "hostname_status": None,
                 }
     log_app("INFO", "[INFO] device_state initialized from DB", extra={"device_count": len(devices)})
+
+
+def set_hostname_status(device_id, status):
+    """Record the in-flight hostname-update status for a device.
+
+    Status values: HOSTNAME_STATUS_PENDING / _OK / _FAILED, or None to clear.
+    Read by format_reservation_block to render the trailing ``Hostname: <symbol>``.
+    """
+    with device_state_lock:
+        st = device_state.get(device_id)
+        if st is None:
+            st = {"health": "unk", "retry_count": 0, "next_check_ts": time.time() + 1}
+            device_state[device_id] = st
+        st["hostname_status"] = status
+
+
+def get_hostname_status(device_id):
+    with device_state_lock:
+        st = device_state.get(device_id) or {}
+        return st.get("hostname_status")
 
 
 class HealthManager(threading.Thread):
@@ -390,14 +438,28 @@ def ssh_ping_once(ssh_client, mgmt_ip, count=2, timeout=6):
         return False
 
 
-def _read_channel_until(channel, timeout_sec=1, stop_patterns=None):
-    """Read from invoke_shell channel until timeout or any stop pattern is seen."""
+def _read_channel_until(channel, timeout_sec=1, stop_patterns=None, stop_regex=_CHANNEL_PROMPT_RE):
+    """Read from an invoke_shell channel until any stop condition is seen, or timeout.
+
+    Uses select() so we wake up immediately when bytes arrive instead of busy-polling
+    in 10 ms ticks; this is what makes the overall hostname-set sequence ~1-2s instead
+    of ~5-8s. Returns as soon as ``stop_regex`` matches the accumulated decoded buffer
+    (defaults to a generic prompt/error matcher) or any literal in ``stop_patterns``
+    appears, otherwise reads until ``timeout_sec`` elapses.
+    """
     stop_patterns = stop_patterns or []
     buf = b""
     deadline = time.time() + timeout_sec
     try:
-        while time.time() < deadline:
-            if channel.recv_ready():
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            try:
+                ready, _, _ = select.select([channel], [], [], min(remaining, 0.2))
+            except (ValueError, OSError):
+                break
+            if channel in ready and channel.recv_ready():
                 try:
                     chunk = channel.recv(4096)
                 except Exception:
@@ -413,8 +475,8 @@ def _read_channel_until(channel, timeout_sec=1, stop_patterns=None):
                     else:
                         if pat in s:
                             return s
-            else:
-                time.sleep(0.01)
+                if stop_regex is not None and stop_regex.search(s):
+                    return s
     except Exception:
         pass
     return buf.decode(errors="ignore")
@@ -436,13 +498,14 @@ def telnet_and_run_show_serviceport(ssh_client, console_ip, device_port, login_u
                 print("[DEBUG] device_port is empty, aborting telnet attempt.")
             return False
         chan = ssh_client.invoke_shell()
-        time.sleep(0.1)
         if config.FLASK_DEBUG:
             print("[DEBUG] Starting telnet session...")
         chan.send(f"telnet {console_ip} {device_port}\n")
         out = _read_channel_until(chan, timeout_sec=1)
         if config.FLASK_DEBUG:
             print(f"[DEBUG] After telnet command:\n{out!r}")
+        # Some console servers don't print "User:" until we wake the line with a newline;
+        # the explicit double-newline here is intentional (see project notes).
         chan.send("\n\n")
         out += _read_channel_until(chan, timeout_sec=.5)
         if config.FLASK_DEBUG:
@@ -565,24 +628,22 @@ def ssh_and_set_hostname(ssh_client, mgmt_ip, new_hostname, serial_no='', login_
             return False, "mgmt_ip not found!"
 
         chan = ssh_client.invoke_shell()
-        time.sleep(0.1)
 
         chan.send(f"ssh {login_user}@{mgmt_ip}\n")
-        out = _read_channel_until(chan, timeout_sec=1)
+        out = _read_channel_until(chan, timeout_sec=2)
 
-        if re.search(r"are you sure you want to continue connecting \(yes/no\)\s*$", out, re.IGNORECASE | re.MULTILINE):
+        if re.search(r"are you sure you want to continue connecting \(yes/no(?:/\[fingerprint\])?\)\?\s*$", out, re.IGNORECASE | re.MULTILINE):
             if config.FLASK_DEBUG:
                 print("[DEBUG] Hostkey prompt detected, sending 'yes'")
             chan.send("yes\n")
-            out += _read_channel_until(chan, timeout_sec=.5)
+            out += _read_channel_until(chan, timeout_sec=2)
 
         if re.search(r"password[: ]*$", out, re.IGNORECASE | re.MULTILINE):
             if config.FLASK_DEBUG:
                 print("[DEBUG] Password prompt detected, sending password")
             chan.send(login_pass + "\n")
-            out += _read_channel_until(chan, timeout_sec=1)
+            out += _read_channel_until(chan, timeout_sec=2)
 
-        out += _read_channel_until(chan, timeout_sec=.5)
         if config.FLASK_DEBUG:
             print(f"[DEBUG] After SSH login attempt -> channel output:\n{out!r}")
 
@@ -638,14 +699,16 @@ def ssh_and_set_hostname(ssh_client, mgmt_ip, new_hostname, serial_no='', login_
                 if config.FLASK_DEBUG:
                     print("[DEBUG] Could not parse serial number from device output")
 
+            # After 'hostname X' the prompt itself changes to "(X)#" — read until we see it
+            # (or generic prompt) so we can verify success without extra fixed-wait reads.
+            new_prompt_re = re.compile(
+                rf"\(\s*{re.escape(new_hostname)}\s*\)\s?[>#]\s*$|\)\s?[>#]\s*$",
+                re.MULTILINE,
+            )
             chan.send(f"hostname {new_hostname}\n")
-            out += _read_channel_until(chan, timeout_sec=1)
+            out += _read_channel_until(chan, timeout_sec=2, stop_regex=new_prompt_re)
             if config.FLASK_DEBUG:
                 print(f"[DEBUG] After 'hostname' cmd:\n{out!r}")
-
-            out += _read_channel_until(chan, timeout_sec=.5)
-            if config.FLASK_DEBUG:
-                print(f"[DEBUG] After waiting for prompt change:\n{out!r}")
 
             prompt_patterns = [rf"\(\s*{re.escape(new_hostname)}\s*\)#\s*$", rf"\(\s*{re.escape(new_hostname)}\s*\)>\s*$"]
             prompt_ok = any(re.search(pat, out, re.MULTILINE) for pat in prompt_patterns)
@@ -689,6 +752,67 @@ def ssh_and_set_hostname(ssh_client, mgmt_ip, new_hostname, serial_no='', login_
         except Exception:
             pass
         return False, f"Exception: {e}"
+
+
+# -------------------------------------------------------------------------------------------------
+# Async hostname-update dispatcher (keeps HTTP responses snappy)
+# -------------------------------------------------------------------------------------------------
+
+def apply_hostname_async(device_id, mgmt_ip, new_hostname, serial_no="", user="system",
+                         component="api", subsystem="reservation"):
+    """Run ssh_and_set_hostname in a daemon thread, tracking status in device_state.
+
+    The caller should already have committed the reservation change to disk so the UI
+    can render it immediately. This function only updates the per-device hostname
+    lifecycle marker (pending -> ok/failed) which format_reservation_block reads.
+    """
+    set_hostname_status(device_id, HOSTNAME_STATUS_PENDING)
+
+    def _worker():
+        if not (mgmt_ip and new_hostname):
+            set_hostname_status(device_id, HOSTNAME_STATUS_FAILED)
+            log_application(
+                "WARNING",
+                f"[WARNING] hostname-async: missing inputs (mgmt={mgmt_ip!r} new={new_hostname!r})",
+                device_id=device_id, user=user,
+                extra={"component": component, "subsystem": subsystem},
+            )
+            return
+        if not health_manager.ensure_ssh():
+            set_hostname_status(device_id, HOSTNAME_STATUS_FAILED)
+            log_application(
+                "WARNING", "[WARNING] hostname-async: SSH unavailable",
+                device_id=device_id, user=user,
+                extra={"component": component, "subsystem": subsystem},
+            )
+            return
+        try:
+            with health_manager.ssh_lock:
+                ok, msg = ssh_and_set_hostname(
+                    health_manager.ssh_client, mgmt_ip, new_hostname, serial_no
+                )
+        except Exception as e:
+            traceback.print_exc()
+            ok, msg = False, str(e)
+        set_hostname_status(
+            device_id,
+            HOSTNAME_STATUS_OK if ok else HOSTNAME_STATUS_FAILED,
+        )
+        log_application(
+            "INFO" if ok else "WARNING",
+            f"[{'INFO' if ok else 'WARNING'}] hostname-async: ok={ok} new={new_hostname!r} msg={msg!r}",
+            device_id=device_id, user=user,
+            extra={
+                "component": component,
+                "subsystem": subsystem,
+                "new_hostname": new_hostname,
+                "mgmt_ip": mgmt_ip,
+            },
+        )
+
+    t = threading.Thread(target=_worker, name=f"hostname-{device_id}", daemon=True)
+    t.start()
+    return t
 
 
 # -------------------------------------------------------------------------------------------------
@@ -744,48 +868,12 @@ class ReservationMonitor(threading.Thread):
                     )
 
                     if mgmt and model_name:
-                        if health_manager.ensure_ssh():
-                            with health_manager.ssh_lock:
-                                try:
-                                    ok, msg = ssh_and_set_hostname(health_manager.ssh_client, mgmt, model_name)
-                                    if ok:
-                                        print(f">>> $ Hostname restored to {model_name} for device {did} (auto-release).")
-                                        log_app(
-                                            "INFO", f"[INFO] auto-release: hostname restored to {model_name!r}",
-                                            device_id=did, user=resv_user,
-                                            extra={
-                                                "component": "reservation_monitor",
-                                                "subsystem": "reservation",
-                                                "mgmt_ip": mgmt,
-                                            },
-                                        )
-                                    else:
-                                        print(f">>> $ Hostname restore to {model_name} failed for device {did} (auto-release). Reason: {msg}")
-                                        log_app(
-                                            "WARNING", f"[WARNING] auto-release: hostname restore failed: {msg}",
-                                            device_id=did, user=resv_user,
-                                            extra={
-                                                "component": "reservation_monitor",
-                                                "subsystem": "reservation",
-                                                "model_name": model_name,
-                                                "mgmt_ip": mgmt,
-                                            },
-                                        )
-                                except Exception as e:
-                                    traceback.print_exc()
-                                    log_app(
-                                        "ERROR", f"[ERROR] auto-release: hostname restore exception: {e}",
-                                        device_id=did, user=resv_user,
-                                        extra={"component": "reservation_monitor", "subsystem": "reservation"},
-                                    )
-                        else:
-                            print(f">>> $ Could not open SSH to LAB to restore hostname for device {did}.")
-                            log_app(
-                                "WARNING", "[WARNING] auto-release: SSH to lab unavailable; hostname not restored",
-                                device_id=did, user=resv_user,
-                                extra={"component": "reservation_monitor", "subsystem": "reservation"},
-                            )
+                        apply_hostname_async(
+                            did, mgmt, model_name,
+                            user=resv_user, component="reservation_monitor",
+                        )
                     else:
+                        set_hostname_status(did, None)
                         log_app(
                             "WARNING", "[WARNING] auto-release: skipped hostname restore (missing mgmt_ip or model_name)",
                             device_id=did, user=resv_user,

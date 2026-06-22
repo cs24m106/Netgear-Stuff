@@ -388,6 +388,16 @@ def api_reserve():
         extra={"component": "api", "subsystem": "reservation", "hours": hours, "minutes": minutes},
     )
     old_tag = d.get("tag", "free")
+    current_user = (d.get("current_user") or "").strip()
+    if old_tag != "free" and current_user != user:
+        log_application(
+            "WARNING",
+            f"[WARNING] api_reserve: device not free tag={old_tag!r} current_user={current_user!r}",
+            device_id=device_id,
+            user=user,
+            extra={"component": "api", "subsystem": "reservation"},
+        )
+        return jsonify({"ok": False, "msg": "device not free"}), 409
     # Static Reservation if >= 24 hours
     if hours >= 24:
         d["tag"] = "static"
@@ -459,18 +469,21 @@ def api_reserve():
     
     if ok:
         print(f">>> $ Hostname set to {new_name} for device: {device_id}")
-        update_resv(
-            device_id,
-            tag=d["tag"],
-            current_user=d["current_user"],
-            duration=d["duration"],
-            resv_end_time=d["resv_end_time"],
-        )
-        log_operation(
-            "EDIT", device_id,
-            {"field": "tag", "old": old_tag, "new": d["tag"], "reservation_user": user},
-            user=user,
-        )
+    else:
+        print(f">>> $ Hostname change to {new_name} failed for device: {device_id}")
+    update_resv(
+        device_id,
+        tag=d["tag"],
+        current_user=d["current_user"],
+        duration=d["duration"],
+        resv_end_time=d["resv_end_time"],
+    )
+    log_operation(
+        "EDIT", device_id,
+        {"field": "tag", "old": old_tag, "new": d["tag"], "reservation_user": user},
+        user=user,
+    )
+    if ok:
         log_application(
             "INFO", f"[INFO] api_reserve: success tag={d['tag']!r} hostname={new_name!r}",
             device_id=device_id, user=user,
@@ -481,9 +494,8 @@ def api_reserve():
             },
         )
     else:
-        print(f">>> $ Hostname change to {new_name} failed for device: {device_id}")
         log_application(
-            "WARNING", f"[WARNING] api_reserve: failed (CSV not committed) msg={msg!r}",
+            "WARNING", f"[WARNING] api_reserve: hostname not set msg={msg!r}",
             device_id=device_id,
             user=user,
             extra={"component": "api", "subsystem": "reservation", "new_hostname": new_name},
@@ -1127,3 +1139,4 @@ def api_stats_export_csv():
 
 def register_blueprints(flask_app):
     flask_app.register_blueprint(bp)
+

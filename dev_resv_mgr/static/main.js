@@ -730,6 +730,12 @@ function setupReservationAndActions(tr, d) {
             } finally {
                 tdResv.removeAttribute('data-editing');
             }
+            // Drop focus so poll updates can rebuild reservation UI from DB.
+            try {
+                if (document.activeElement && document.body.contains(document.activeElement)) {
+                    document.activeElement.blur();
+                }
+            } catch (e) { /* ignore */ }
             // Refresh after clearing data-editing.
             pollAndUpdate(true).catch(e => console.error(e));
         };

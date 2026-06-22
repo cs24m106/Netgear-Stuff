@@ -1,8 +1,5 @@
 {
-  "lab": {
-    "PI":{"IP":"10.25.4.200", "USER":"host1", "PSWD":"sheldon123"},
-    "NUC":{"IP":"10.25.4.201", "USER":"swnuc01", "PSWD":"switch@123"}
-  },
+  "lab": {"PI": {"IP": "10.25.4.200", "USER": "host1", "PSWD": "sheldon123"}, "NUC": {"IP": "10.25.4.201", "USER": "swnuc01", "PSWD": "switch@123"}},
   "devices": [
     {
       "static": {"device_id": "ng-370", "serial_no": "7FD8585FA01B3", "model_name": "M4250-40G8F-PoE+", "hw_id": "GSM4248P V1"},
